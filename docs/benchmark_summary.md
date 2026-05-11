@@ -14,6 +14,17 @@
 | OmniPrefold | 300 | 0.3409 | 0.2872 | 0.4532 | 100% | 60.8ms |
 | OmniPrefold | 1000 | 0.3472 | — | — | 100% | — |
 | OmniPrefold | 3000 | 0.3285 | — | — | 100% | — |
+| **OmniPrefold + min_loop=4 prune** | — (eval-only) | **0.3896** | 0.3360 | 0.5281 | 100% | ~70ms |
+| **OmniPrefold + energy prior λ=0.5** | — (eval-only) | **0.3598** | 0.3081 | 0.4860 | 100% | ~2ms overhead |
+| OmniPrefold + bias table | 500 | 0.2428 (val) | — | — | 100% | — |
+
+## Structural calibration findings (2026-05)
+
+- Global `pair_logit_offset=-2`: rejected (seed 123 crash, F1=0.316±0.076)
+- `min_loop=4` pruning: **+14% F1 improvement** (eval-only, no retraining)
+- Energy prior (canonical+loop+distance): modest improvement
+- Bias table (learnable): underperforms mainline at 500 steps
+- Local rank loss: computationally too slow with current implementation
 
 ### Step scaling (val split)
 

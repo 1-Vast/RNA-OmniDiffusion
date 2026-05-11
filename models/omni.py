@@ -1,10 +1,95 @@
 ﻿from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Sequence
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+class PairSpecificBias(nn.Module):
+    """Pair-specific learnable bias table: 7 base-type priors + 5 distance buckets."""
+
+    # Mapping: (from_base, to_base) -> type index
+    _CANONICAL_ORDER = {("G","C"):0, ("C","G"):1, ("A","U"):2, ("U","A"):3, ("G","U"):4, ("U","G"):5}
+    _BASE_TO_IDX = {"A": 0, "U": 1, "G": 2, "C": 3, "N": 4}
+
+    def __init__(self, init_from_prior: bool = True, learnable: bool = True) -> None:
+        super().__init__()
+        if init_from_prior:
+            # GC=+1.0, CG=+1.0, AU=+0.6, UA=+0.6, GU=+0.3, UG=+0.3, noncanonical=-2.0
+            type_init = torch.tensor([1.0, 1.0, 0.6, 0.6, 0.3, 0.3, -2.0])
+            # 0-4, 5-10, 11-30, 31-80, 81+
+            dist_init = torch.tensor([0.5, 0.3, 0.0, -0.3, -0.5])
+        else:
+            type_init = torch.zeros(7)
+            dist_init = torch.zeros(5)
+        self.type_bias = nn.Parameter(type_init, requires_grad=learnable)
+        self.dist_bias = nn.Parameter(dist_init, requires_grad=learnable)
+        self._type_lookup: torch.Tensor | None = None
+
+    def _get_type_lookup(self, device: torch.device) -> torch.Tensor:
+        if self._type_lookup is not None and self._type_lookup.device == device:
+            return self._type_lookup
+        # 5x5 lookup, default index 6 (noncanonical)
+        lookup = torch.full((5, 5), 6, dtype=torch.long, device=device)
+        for (b1, b2), idx in self._CANONICAL_ORDER.items():
+            lookup[self._BASE_TO_IDX[b1], self._BASE_TO_IDX[b2]] = idx
+        self._type_lookup = lookup
+        return lookup
+
+    def compute_bias(
+        self, raw_seqs: Sequence[str], lengths: torch.Tensor, device: torch.device
+    ) -> torch.Tensor:
+        """Compute (B, L, L) pair-specific bias.
+
+        Args:
+            raw_seqs: RNA sequences as strings (e.g. "AUCG").
+            lengths: valid lengths per sample.
+            device: target device.
+        """
+        B = len(raw_seqs)
+        L = int(lengths.max().item())
+        lookup = self._get_type_lookup(device)
+
+        # Encode sequences as base indices
+        max_len = max(len(s) for s in raw_seqs)
+        base_idx = torch.full((B, max_len), 4, dtype=torch.long, device=device)
+        for b, seq in enumerate(raw_seqs):
+            slen = len(seq)
+            vals = [self._BASE_TO_IDX.get(c.upper().replace("T","U"), 4) for c in seq]
+            base_idx[b, :slen] = torch.tensor(vals, dtype=torch.long, device=device)
+
+        # Type bias: (i,j) -> type_bias[lookup[base_i, base_j]]
+        bi = base_idx[:, :, None].expand(-1, -1, max_len)
+        bj = base_idx[:, None, :].expand(-1, max_len, -1)
+        type_ids = lookup[bi.clamp(0, 4), bj.clamp(0, 4)]  # (B, L, L)
+        bias = self.type_bias[type_ids]
+
+        # Distance bias
+        idx = torch.arange(max_len, device=device)
+        dist = (idx[:, None] - idx[None, :]).abs()  # (L, L)
+        buckets = torch.zeros_like(dist, dtype=torch.long)
+        buckets = torch.where(dist <= 4,  buckets.new_tensor(0), buckets)
+        buckets = torch.where((dist >= 5)  & (dist <= 10), buckets.new_tensor(1), buckets)
+        buckets = torch.where((dist >= 11) & (dist <= 30), buckets.new_tensor(2), buckets)
+        buckets = torch.where((dist >= 31) & (dist <= 80), buckets.new_tensor(3), buckets)
+        buckets = torch.where(dist >= 81, buckets.new_tensor(4), buckets)
+        bias = bias + self.dist_bias[buckets].unsqueeze(0)
+
+        # Mask invalid positions
+        valid_len = torch.arange(max_len, device=device).unsqueeze(0) < lengths.to(device).unsqueeze(1)
+        valid = valid_len.unsqueeze(1) & valid_len.unsqueeze(2)
+        bias = bias * valid.float()
+
+        # Pad/truncate to requested L if needed
+        if max_len < L:
+            result = torch.zeros(B, L, L, device=device, dtype=bias.dtype)
+            result[:, :max_len, :max_len] = bias
+            bias = result
+        elif max_len > L:
+            bias = bias[:, :L, :L]
+        return bias
 
 
 class PairRefineBlock(nn.Module):
@@ -48,6 +133,11 @@ class RNAOmniDiffusion(nn.Module):
         pairrefinedrop: float = 0.0,
         pair_arch: str | None = None,
         pair_logit_offset: float = 0.0,
+        pair_specific_bias_enabled: bool = False,
+        pair_specific_bias_init_prior: bool = True,
+        pair_specific_bias_learnable: bool = True,
+        pair_specific_bias_use_type: bool = True,
+        pair_specific_bias_use_distance: bool = True,
     ) -> None:
         super().__init__()
         self.vocab_size = vocab_size
@@ -119,6 +209,14 @@ class RNAOmniDiffusion(nn.Module):
                     PairRefineBlock(int(pairrefinechannels), float(pairrefinedrop))
                     for _ in range(max(1, int(pairrefineblocks)))
                 )
+            self.pair_specific_bias = None
+            if pair_specific_bias_enabled:
+                self.pair_specific_bias = PairSpecificBias(
+                    init_from_prior=pair_specific_bias_init_prior,
+                    learnable=pair_specific_bias_learnable,
+                )
+                self._psb_use_type = pair_specific_bias_use_type
+                self._psb_use_distance = pair_specific_bias_use_distance
         # Optional pair-architecture add-on
         self.pair_arch = None
         if pair_arch and pair_arch != "base":
@@ -134,6 +232,7 @@ class RNAOmniDiffusion(nn.Module):
         task_ids: torch.Tensor,
         time_steps: torch.Tensor,
         seq_positions: torch.Tensor | None = None,
+        raw_seq: Sequence[str] | None = None,
     ) -> Dict[str, torch.Tensor | None]:
         batch_size, seq_len = input_ids.shape
         if seq_len > self.position_embedding.num_embeddings:
@@ -164,7 +263,7 @@ class RNAOmniDiffusion(nn.Module):
 
         pair_logits = None
         if self.use_pair_head and seq_positions is not None:
-            pair_logits = self._pair_logits(encoded, seq_positions)
+            pair_logits = self._pair_logits(encoded, seq_positions, raw_seq=raw_seq)
             if self.pair_arch is not None:
                 lengths = torch.tensor([(seq_positions[b] >= 0).sum().item()
                                         for b in range(seq_positions.shape[0])],
@@ -180,7 +279,7 @@ class RNAOmniDiffusion(nn.Module):
             "pair_logits": pair_logits,
         }
 
-    def _pair_logits(self, hidden: torch.Tensor, seq_positions: torch.Tensor) -> torch.Tensor:
+    def _pair_logits(self, hidden: torch.Tensor, seq_positions: torch.Tensor, raw_seq: Sequence[str] | None = None) -> torch.Tensor:
         gather_positions = seq_positions.clamp_min(0)
         expanded = gather_positions.unsqueeze(-1).expand(-1, -1, hidden.size(-1))
         seq_hidden = hidden.gather(1, expanded)
@@ -208,6 +307,10 @@ class RNAOmniDiffusion(nn.Module):
             for block in self.pair_refiner:
                 logits = block(logits)
                 logits = 0.5 * (logits + logits.transpose(1, 2))
+        if self.pair_specific_bias is not None and raw_seq is not None:
+            lengths = (seq_positions >= 0).sum(dim=1)
+            bias = self.pair_specific_bias.compute_bias(raw_seq, lengths, hidden.device)
+            logits = logits + bias
         invalid = valid.squeeze(-1) == 0
         logits = logits.masked_fill(invalid.unsqueeze(1), self.invalidlogit)
         logits = logits.masked_fill(invalid.unsqueeze(2), self.invalidlogit)

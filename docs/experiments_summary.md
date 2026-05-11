@@ -41,10 +41,28 @@ Final conclusions from systematic evaluation of model components and LLM integra
 
 Across 5 routes (O, P, Q, R, S) tested under controlled comparison, LLM has **not demonstrated independent value** as a model-performance module, configuration planner, implementation auditor, or causal reasoning planner. The strongest and simplest configuration is a clean non-LLM pipeline.
 
+## Structural Calibration (2026-05)
+
+To address over-pairing / false positive candidate pollution, we tested structure-aware,
+localized pair calibration methods. Global `pair_logit_offset` was already rejected (seed-dependent recall collapse).
+
+| Method | Status | Best F1 (test) | vs Mainline |
+|---|---|---|---|
+| Global offset=-2 | Rejected | 0.316±0.076 | Worse (seed collapse) |
+| min_loop=4 pruning | **Eval-only** | **0.3896** | **+0.049** |
+| Energy prior λ=0.5 | Eval-only | 0.3598 | +0.019 |
+| Bias table (500 steps) | Training | 0.2428 val | Below |
+| Rank loss | Slow | n/a | Needs optimization |
+
+### Key Finding
+`min_loop=4` pruning (eval-only, no retraining) improves F1 from 0.340 to 0.389 on test.
+The prior is applied pre-Nussinov, simply requiring tighter hairpin loop constraints.
+
 ## Current Best Configuration
 
 ```
 MS-MPRM + PairRefine + pair-aware masking + lr=0.001 + strict Nussinov
 ```
-- Val F1: ~0.332
+- Val F1: ~0.332 (300 steps)
 - Config: `config/mainline_strongest.yaml`
+- Best structural calibration: min_loop=4 pruning (eval-only, +14% F1)

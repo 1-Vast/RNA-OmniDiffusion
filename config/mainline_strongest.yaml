@@ -83,6 +83,10 @@ relation_mask:
   hard_negative_ratio: 0.25
   total_ratio: 0.3
 
+pair_calibration:
+  enabled: false
+  pair_logit_offset: 0.0
+
 baselines:
   run_all_dot: true
   run_random_pair: true

@@ -19,6 +19,7 @@ from models.dataset import RNAOmniDataset
 from models.token import RNAOmniTokenizer
 from models.decode import generate_sequence_invfold, generate_structure_seq2struct
 from models.omni import RNAOmniDiffusion, compute_omni_loss
+from models.rank import local_rank_loss
 from utils.metric import base_pair_f1, evaluate_structures
 from models.display import (
     checkpoint_saved,
@@ -142,6 +143,18 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     pr.setdefault("kernel_size", 3)
     pr.setdefault("residual_scale", 0.1)
     pr.setdefault("init", "zero")
+    psb = config.setdefault("pair_specific_bias", {})
+    psb.setdefault("enabled", False)
+    psb.setdefault("type_bias", True)
+    psb.setdefault("distance_bias", True)
+    psb.setdefault("init_from_prior", True)
+    psb.setdefault("learnable", True)
+    lrk = config.setdefault("local_rank_loss", {})
+    lrk.setdefault("enabled", False)
+    lrk.setdefault("margin", 1.0)
+    lrk.setdefault("weight", 0.1)
+    lrk.setdefault("negatives_per_positive", 4)
+    lrk.setdefault("warmup_steps", 100)
     return config
 
 
@@ -280,6 +293,11 @@ def build_model(config: Dict[str, Any], tokenizer: RNAOmniTokenizer, device: tor
         pairrefinedrop=float(model_cfg.get("pairrefinedrop", 0.0)),
         pair_arch=str(config.get("pair_arch", {}).get("type", "base")) if (config.get("pair_arch", {}).get("enabled", False) or config.get("pair_residual", {}).get("enabled", False)) else None,
         pair_logit_offset=float(config.get("training", {}).get("pair_logit_offset", 0.0)),
+        pair_specific_bias_enabled=bool(config.get("pair_specific_bias", {}).get("enabled", False)),
+        pair_specific_bias_init_prior=bool(config.get("pair_specific_bias", {}).get("init_from_prior", True)),
+        pair_specific_bias_learnable=bool(config.get("pair_specific_bias", {}).get("learnable", True)),
+        pair_specific_bias_use_type=bool(config.get("pair_specific_bias", {}).get("type_bias", True)),
+        pair_specific_bias_use_distance=bool(config.get("pair_specific_bias", {}).get("distance_bias", True)),
     )
     return model.to(device)
 
@@ -464,6 +482,7 @@ def forward_model(model: RNAOmniDiffusion, batch: dict) -> dict:
         task_ids=batch["task_ids"],
         time_steps=batch["time_steps"],
         seq_positions=batch["seq_positions"],
+        raw_seq=batch.get("raw_seq"),
     )
 
 
@@ -518,11 +537,12 @@ def estimate_loss_options(config: Dict[str, Any], dataset: RNAOmniDataset, token
         and bool(config.get("ablation", {}).get("use_pair_head", True)),
         "structure_bracket_weight": float(bracket_weight),
         "pair_loss_policy": config.get("pair_loss_policy", {}),
+        "local_rank_loss": config.get("local_rank_loss", {}),
     }
 
 
 def loss_from_batch(outputs: dict, batch: dict, loss_options: dict) -> dict:
-    return compute_omni_loss(
+    result = compute_omni_loss(
         outputs,
         batch,
         lambda_pair=loss_options["lambda_pair"],
@@ -534,11 +554,36 @@ def loss_from_batch(outputs: dict, batch: dict, loss_options: dict) -> dict:
         pair_options=loss_options.get("pair_options"),
         pair_loss_policy=loss_options.get("pair_loss_policy"),
     )
+    # Local pair ranking loss (optional)
+    rank_cfg = loss_options.get("local_rank_loss", {})
+    rank_loss = result["loss"].new_zeros(())
+    if rank_cfg.get("enabled", False):
+        pair_logits = outputs.get("pair_logits")
+        pair_labels = batch.get("pair_labels")
+        raw_seq = batch.get("raw_seq")
+        global_step = loss_options.get("global_step", 0)
+        warmup = int(rank_cfg.get("warmup_steps", 100))
+        if pair_logits is not None and pair_labels is not None and raw_seq is not None:
+            # Warmup: linearly ramp weight from 0 to full
+            weight = float(rank_cfg.get("weight", 0.1))
+            if warmup > 0 and global_step < warmup:
+                weight = weight * (global_step + 1) / warmup
+            if weight > 0:
+                rank_loss = local_rank_loss(
+                    pair_logits.float(),
+                    pair_labels.to(pair_logits.device).float(),
+                    raw_seq,
+                    margin=float(rank_cfg.get("margin", 1.0)),
+                    negatives_per_positive=int(rank_cfg.get("negatives_per_positive", 4)),
+                )
+                result["loss"] = result["loss"] + weight * rank_loss
+    result["rank_loss"] = rank_loss.detach()
+    return result
 
 
 def update_running(total: dict, loss_dict: dict, batch_size: int) -> None:
     total["samples"] += batch_size
-    for key in ("loss", "token_loss", "pair_loss", "conflict_loss"):
+    for key in ("loss", "token_loss", "pair_loss", "conflict_loss", "rank_loss"):
         total[key] += float(loss_dict[key].detach().cpu()) * batch_size
     # preference metrics
     for key in ("pref_loss", "pref_covered"):
@@ -589,6 +634,7 @@ def averages(total: dict, prefix: str) -> dict:
         f"{prefix}_token_loss": total["token_loss"] / denom,
         f"{prefix}_pair_loss": total["pair_loss"] / denom,
         f"{prefix}_conflict_loss": total["conflict_loss"] / denom,
+        f"{prefix}_rank_loss": total["rank_loss"] / denom,
     }
     if total.get("pref_covered", 0) > 0:
         result[f"{prefix}_pref_loss"] = total.get("pref_loss", 0.0) / total["pref_covered"]
@@ -686,7 +732,7 @@ def evaluate_model(
     decode_structures: bool = True,
 ) -> dict:
     model.eval()
-    totals = {"samples": 0, "loss": 0.0, "token_loss": 0.0, "pair_loss": 0.0, "conflict_loss": 0.0}
+    totals = {"samples": 0, "loss": 0.0, "token_loss": 0.0, "pair_loss": 0.0, "conflict_loss": 0.0, "rank_loss": 0.0}
     token_correct = 0
     token_count = 0
     pair_diag = {
@@ -888,12 +934,13 @@ def train_model(
     for epoch in range(start_epoch, int(config["training"]["epochs"]) + 1):
         epoch_start = time.time()
         model.train()
-        train_totals = {"samples": 0, "loss": 0.0, "token_loss": 0.0, "pair_loss": 0.0, "conflict_loss": 0.0, "pref_loss": 0.0, "pref_covered": 0}
+        train_totals = {"samples": 0, "loss": 0.0, "token_loss": 0.0, "pair_loss": 0.0, "conflict_loss": 0.0, "rank_loss": 0.0, "pref_loss": 0.0, "pref_covered": 0}
         for batch in train_loader:
             batch = move_batch_to_device(batch, device)
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=use_amp):
                 outputs = forward_model(model, batch)
+                loss_options["global_step"] = global_step
                 loss_dict = loss_from_batch(outputs, batch, loss_options)
                 loss = loss_dict["loss"]
             scaler.scale(loss).backward()
@@ -910,6 +957,7 @@ def train_model(
                     f"loss={float(loss.detach().cpu()):.4f} "
                     f"token={float(loss_dict['token_loss'].cpu()):.4f} "
                     f"pair={float(loss_dict['pair_loss'].cpu()):.4f} "
+                    f"rank={float(loss_dict.get('rank_loss', loss.new_zeros(()).detach()).cpu()):.4f} "
                     f"conflict={float(loss_dict['conflict_loss'].cpu()):.4f}"
                 )
             if max_steps is not None and global_step >= max_steps:

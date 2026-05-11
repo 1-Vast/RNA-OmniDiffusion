@@ -1,6 +1,5 @@
-# RNA-OmniPrefold validated mainline config
-# MS-MPRM + PairRefine + pair-aware masking + corrected lr schedule + strict Nussinov decode
-# All invalid/negative modules disabled or removed.
+# RNA-OmniPrefold with pair-specific bias table
+# Based on mainline_strongest + PairSpecificBias module
 data:
   train_jsonl: dataset/archive/train.jsonl
   val_jsonl: dataset/archive/val.jsonl
@@ -48,7 +47,7 @@ training:
   grad_clip: 1.0
   amp: true
   seed: 42
-  output_dir: outputs/mainline_lr0010
+  output_dir: outputs/bias_table
   save_best_by: val_pair_f1
   early_stopping_patience: 10
   min_delta: 0.0001
@@ -56,6 +55,13 @@ training:
   train_decode_structures: true
   val_decode_samples: 64
   val_max_batches: 0
+
+pair_specific_bias:
+  enabled: true
+  type_bias: true
+  distance_bias: true
+  init_from_prior: true
+  learnable: true
 
 decoding:
   num_steps: 32
@@ -82,10 +88,6 @@ relation_mask:
   stem_span_ratio: 0.35
   hard_negative_ratio: 0.25
   total_ratio: 0.3
-
-pair_calibration:
-  enabled: false
-  pair_logit_offset: 0.0
 
 baselines:
   run_all_dot: true

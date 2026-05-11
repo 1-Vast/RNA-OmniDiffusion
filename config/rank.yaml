@@ -1,6 +1,5 @@
-# RNA-OmniPrefold validated mainline config
-# MS-MPRM + PairRefine + pair-aware masking + corrected lr schedule + strict Nussinov decode
-# All invalid/negative modules disabled or removed.
+# RNA-OmniPrefold with local pair ranking loss
+# Based on mainline_strongest + local_rank_loss module
 data:
   train_jsonl: dataset/archive/train.jsonl
   val_jsonl: dataset/archive/val.jsonl
@@ -48,7 +47,7 @@ training:
   grad_clip: 1.0
   amp: true
   seed: 42
-  output_dir: outputs/mainline_lr0010
+  output_dir: outputs/rank
   save_best_by: val_pair_f1
   early_stopping_patience: 10
   min_delta: 0.0001
@@ -56,6 +55,13 @@ training:
   train_decode_structures: true
   val_decode_samples: 64
   val_max_batches: 0
+
+local_rank_loss:
+  enabled: true
+  margin: 1.0
+  weight: 0.1
+  negatives_per_positive: 4
+  warmup_steps: 100
 
 decoding:
   num_steps: 32
@@ -82,10 +88,6 @@ relation_mask:
   stem_span_ratio: 0.35
   hard_negative_ratio: 0.25
   total_ratio: 0.3
-
-pair_calibration:
-  enabled: false
-  pair_logit_offset: 0.0
 
 baselines:
   run_all_dot: true

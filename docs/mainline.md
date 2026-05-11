@@ -54,6 +54,17 @@ All modules below were systematically tested and found to be invalid, negative, 
 | Structural importance weighting | Disabled | Reduces F1 by ~0.005 |
 | Typed data training | Removed | No demonstrated benefit |
 | Coach policy | Removed | No demonstrated benefit |
+| Global pair_logit_offset=-2 | Rejected | Seed-dependent recall collapse |
+| Pair-specific bias table (500 steps) | Below mainline | val F1=0.2428 < 0.351 mainline |
+| Local rank loss | Too slow | Needs vectorization optimization |
+
+## Pair Calibration Status
+
+`pair_logit_offset: 0.0` is the default. `pair_calibration.enabled: false`.
+Global offset rejected after multi-seed negative results (see `docs/calibration_analysis.md`).
+Candidate pruning (min_loop=4) shows promise as eval-only enhancement (test F1=0.3896).
+Energy-inspired prior (lambda=0.5) gives modest improvement (F1=0.3598).
+Both are eval-only and do not require retraining.
 
 ## Config File
 

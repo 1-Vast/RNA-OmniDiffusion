@@ -130,6 +130,7 @@ def nussinov_decode(
     input_is_logit: bool = False,
     pair_prior: "np.ndarray | None" = None,
     pair_prior_alpha: float = 0.0,
+    pruning_mask: "np.ndarray | None" = None,
 ) -> str:
     """Decode a non-pseudoknotted dot-bracket structure from pair logits/probabilities.
 
@@ -180,6 +181,10 @@ def nussinov_decode(
             if seq[i] != "N" and seq[j] != "N" and not canonical_pair(seq[i], seq[j], allow_wobble):
                 continue
             valid_mask[i, j] = True
+
+    if pruning_mask is not None:
+        pm = np.asarray(pruning_mask, dtype=bool)
+        valid_mask = valid_mask & pm[:length, :length]
 
     valid_candidates: List[tuple[float, int, int]] = []
     valid_i, valid_j = np.nonzero(valid_mask)
@@ -238,6 +243,139 @@ def nussinov_decode(
 
     backtrack(0, length - 1)
     return pairs_to_dot_bracket(pairs, length)
+
+
+def apply_pruning_mask(
+    seq: str,
+    pair_scores: "torch.Tensor | np.ndarray",
+    strategy: str,
+    params: dict | None = None,
+) -> np.ndarray:
+    """Return a boolean (L x L) mask of allowed pairs for a given pruning strategy.
+
+    Strategies
+    ----------
+    canonical_only
+        Only AU, UA, GC, CG, GU, UG pairs (respects allow_wobble in params).
+    min_loop_strict
+        Ensure |i - j| > min_loop (param: min_loop, default 3).
+    topk_per_base
+        Each base i keeps the top-k candidates j by score (param: k).
+    distance_bucket_top_percentile
+        Grouped by |i - j| distance bucket, keep top percentile (param: percentile).
+    canonical_plus_topk
+        canonical_only AND topk_per_base.
+    canonical_plus_distance_prune
+        canonical_only AND distance_bucket_top_percentile.
+    """
+    params = dict(params or {})
+    length = len(seq)
+    # Convert pair_scores to numpy
+    if isinstance(pair_scores, torch.Tensor):
+        scores = pair_scores.detach().float().cpu().numpy()
+    else:
+        scores = np.asarray(pair_scores, dtype=np.float32)
+    scores = scores[:length, :length]
+
+    strategy = str(strategy).lower().strip()
+
+    def _canonical_mask() -> np.ndarray:
+        allow_wobble = bool(params.get("allow_wobble", True))
+        cm = np.zeros((length, length), dtype=bool)
+        for i in range(length):
+            for j in range(i + 1, length):
+                if canonical_pair(seq[i], seq[j], allow_wobble):
+                    cm[i, j] = True
+        return cm
+
+    def _min_loop_mask() -> np.ndarray:
+        ml = int(params.get("min_loop", 3))
+        mm = np.zeros((length, length), dtype=bool)
+        for i in range(length):
+            for j in range(i + ml + 1, length):
+                mm[i, j] = True
+        return mm
+
+    def _topk_mask() -> np.ndarray:
+        k = int(params.get("k", 1))
+        tk = np.zeros((length, length), dtype=bool)
+        for i in range(length):
+            row = scores[i, i + 1:]
+            if len(row) == 0:
+                continue
+            k_actual = min(k, len(row))
+            top_indices = np.argpartition(-row, k_actual - 1)[:k_actual]
+            for idx in top_indices:
+                tk[i, i + 1 + int(idx)] = True
+        return tk
+
+    def _distance_bucket_mask() -> np.ndarray:
+        percentile = float(params.get("percentile", 10))
+        db = np.zeros((length, length), dtype=bool)
+        buckets: dict[int, list[tuple[float, int, int]]] = {}
+        for i in range(length):
+            for j in range(i + 1, length):
+                d = j - i
+                buckets.setdefault(d, []).append((float(scores[i, j]), i, j))
+        for d, candidates in buckets.items():
+            if not candidates:
+                continue
+            vals = [c[0] for c in candidates]
+            threshold = float(np.percentile(vals, 100.0 - percentile))
+            for score_val, ci, cj in candidates:
+                if score_val >= threshold:
+                    db[ci, cj] = True
+        return db
+
+    if strategy == "canonical_only":
+        return _canonical_mask()
+    elif strategy == "min_loop_strict":
+        return _min_loop_mask()
+    elif strategy == "topk_per_base":
+        return _topk_mask()
+    elif strategy == "distance_bucket_top_percentile":
+        return _distance_bucket_mask()
+    elif strategy == "canonical_plus_topk":
+        return _canonical_mask() & _topk_mask()
+    elif strategy == "canonical_plus_distance_prune":
+        return _canonical_mask() & _distance_bucket_mask()
+    else:
+        raise ValueError(
+            f"Unknown pruning strategy: {strategy!r}. "
+            f"Valid: canonical_only, min_loop_strict, topk_per_base, "
+            f"distance_bucket_top_percentile, canonical_plus_topk, canonical_plus_distance_prune"
+        )
+
+
+def prune_and_decode(
+    seq: str,
+    pair_scores: "torch.Tensor | np.ndarray",
+    pruning_strategy: str,
+    pruning_params: dict | None = None,
+    **nussinov_kwargs,
+) -> str:
+    """Apply a pruning mask to pair scores, then run Nussinov decoding.
+
+    Parameters
+    ----------
+    seq : str
+        RNA sequence.
+    pair_scores : torch.Tensor or np.ndarray
+        (L, L) pair logits or probabilities.
+    pruning_strategy : str
+        One of the supported pruning strategies (see apply_pruning_mask).
+    pruning_params : dict or None
+        Additional parameters for the pruning strategy.
+    **nussinov_kwargs
+        Forwarded to nussinov_decode (min_loop_length, allow_wobble, etc.).
+
+    Returns
+    -------
+    str
+        Dot-bracket structure string.
+    """
+    pruning_mask = apply_pruning_mask(seq, pair_scores, pruning_strategy, pruning_params)
+    return nussinov_decode(seq, pair_scores, pruning_mask=pruning_mask, **nussinov_kwargs)
 
 
 def _canonical_mask_for_batch(
