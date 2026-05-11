@@ -15,6 +15,7 @@ This document records all experimental routes tested but not adopted as mainline
 | LLM reranker (constrained) | Inconclusive | F1=0.1223 equals Rule, no added value | Not valid module |
 | No-LLM structural tagaux | Negative | λ=0.03 unchanged (0.2009), λ=0.20 degrades (0.1899) | Not recommended |
 | LLM structured tags / CLIP | Not entered | No-LLM tagaux showed no positive signal | Deferred |
+| Structural Importance Masking | **Negative** | Rule imp 0.3349 < baseline 0.3406 (-0.0057). Random imp = rule imp. Mechanism confirmed non-beneficial | Closed |
 
 ## Details
 
@@ -38,3 +39,13 @@ Free LLM reranker (F1=0.1025) underperforms Rule Reranker (F1=0.1223). Constrain
 
 ### Structural Tag Auxiliary
 Struct_aux infrastructure built. No-LLM tagaux at λ=0.03 unchanged from MS-MPRM. λ=0.20 degrades F1 to 0.1899. Auxiliary task interferes with Pair BCE.
+
+### Structural Importance Masking (Route O)
+Per-position structural importance scores converted to pair-level BCE loss weights. Original claim of rule importance F1=0.3331 exceeding baseline was a confound: the importance data (500 samples) was a subset of the full training set (1316 samples), and subset training alone explains the gain (baseline-500 = 0.3406).
+
+Clean comparison at lr=0.001, warmup=50, 300 steps on val split:
+- Baseline-500 (no importance): 0.3406
+- Rule importance: 0.3349 (-0.0057)
+- Random importance: 0.3354 (-0.0052)
+
+Both rule and random importance weighting REDUCE F1 compared to no-weighting baseline. Rule ≈ Random confirms mechanism is not benefiting from structural signal. Root cause: importance scores lack variance (median 0.70, mean 0.82), producing near-uniform pair weights after normalization. Route O closed.

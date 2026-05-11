@@ -1,5 +1,46 @@
 # LLM-guided Preference Optimization
 
+## Current Status
+
+**2026-05-09**: Preference optimization evaluated across multiple budgets and configurations.
+
+### Key Results
+
+| Budget | Method | Pair F1 | vs baseline |
+|---|---|---|---|
+| 300-step | baseline | 0.1852 | — |
+| 300-step | oracle β=0.005 warmup | 0.1973 | +0.0121 |
+| 500-step | baseline | 0.2440 | — |
+| 500-step | oracle β=0.005 warmup | 0.2447 | +0.0007 |
+| 500-step | RAG β=0.005 warmup | 0.2442 | +0.0002 |
+
+### Critical Findings
+
+1. **Preference helps at early stages (300 steps, +0.0121)** but provides diminishing returns at later stages (500 steps, +0.0007).
+2. **Low-beta (0.005) + warmup (start_epoch_ratio=0.3) is essential.** High beta (2.0) without warmup destroys training (oracle F1=0.1727 vs baseline 0.1852).
+3. **Low-label same-step comparisons are confounded by epoch exposure.** Low10 300-step (36 epochs) outperforms full 300-step (5.5 epochs), but same-epoch low10 45-step (0.1414) underperforms full (0.1852).
+4. **Preference is more of an early-stage regularizer** than a full-budget performance booster.
+5. **LLM/RAG does not clearly outperform rule-based preference** at current judge quality.
+
+### Valid Configuration
+
+```yaml
+preference:
+  enabled: true
+  beta: 0.005
+  start_epoch_ratio: 0.3
+  min_confidence: 0.6
+  loss_type: ranking
+  skip_empty_pairdiff: true
+  confidence_weighted: true
+```
+
+### Failed Configurations
+
+- beta=2.0 + no warmup: Destroys training (gradient overwhelms BCE).
+- Weighted BCE: Significantly worse than baseline.
+- Full-matrix pair BCE: Too strong, degrades performance.
+
 ## Motivation
 
 Supervised pair-relation BCE treats every annotated pair equally. In practice, some pairs are structurally more salient than others. Preference optimization provides a complementary signal: the model learns to rank candidate structures via pairwise comparison, without requiring finer-grained per-pair supervision.

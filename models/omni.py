@@ -21,6 +21,63 @@ class PairRefineBlock(nn.Module):
         return logits + self.net(logits.unsqueeze(1)).squeeze(1)
 
 
+class StructureQueryAdapter(nn.Module):
+    """Learnable structure queries with cross-attention to encoder states.
+    Inspired by Q-former / multimodal adapter design. No LLM dependency.
+    """
+    def __init__(self, hidden_size=512, num_queries=4, num_heads=4,
+                 num_layers=1, dropout=0.1, condition_mode="add",
+                 alpha=0.05, gate_init=-4.0):
+        super().__init__()
+        self.num_queries = num_queries
+        self.condition_mode = condition_mode
+        self.alpha = alpha
+        self.query_embed = nn.Parameter(torch.randn(1, num_queries, hidden_size) * 0.02)
+        self.cross_attn = nn.MultiheadAttention(hidden_size, num_heads,
+                                                 dropout=dropout, batch_first=True)
+        self.attn_norm = nn.LayerNorm(hidden_size)
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size * 4), nn.GELU(),
+            nn.Dropout(dropout), nn.Linear(hidden_size * 4, hidden_size),
+        )
+        self.ffn_norm = nn.LayerNorm(hidden_size)
+        # Pair conditioning projections -- initialized near zero for weak modes
+        if "filmweak" in condition_mode or "film" == condition_mode:
+            self.film_proj = nn.Sequential(
+                nn.Linear(hidden_size, hidden_size), nn.GELU(),
+                nn.Linear(hidden_size, 2),
+            )
+            # Initialize last layer to zero
+            nn.init.zeros_(self.film_proj[-1].weight)
+            nn.init.zeros_(self.film_proj[-1].bias)
+        else:
+            self.cond_proj = nn.Sequential(
+                nn.Linear(hidden_size, hidden_size), nn.GELU(),
+                nn.Linear(hidden_size, 1),
+            )
+            nn.init.zeros_(self.cond_proj[-1].weight)
+            nn.init.zeros_(self.cond_proj[-1].bias)
+        # Gated mode
+        if "gated" in condition_mode:
+            self.gate_param = nn.Parameter(torch.tensor(gate_init))
+
+    def forward(self, encoder_hidden, attention_mask=None):
+        B = encoder_hidden.size(0)
+        q = self.query_embed.expand(B, -1, -1)  # [B, M, H]
+        key_padding = (attention_mask == 0) if attention_mask is not None else None
+        attn_out, _ = self.cross_attn(q, encoder_hidden, encoder_hidden,
+                                       key_padding_mask=key_padding)
+        q = self.attn_norm(q + attn_out)
+        q = self.ffn_norm(q + self.ffn(q))
+        query_summary = q.mean(dim=1)  # [B, H]
+        proj_out = query_summary
+        if hasattr(self, 'cond_proj'):
+            proj_out = self.cond_proj(query_summary)
+        elif hasattr(self, 'film_proj'):
+            proj_out = query_summary
+        return q, query_summary, proj_out
+
+
 class RNAOmniDiffusion(nn.Module):
     """RNA-OmniPrefold relation-aware masked denoising model for RNA folding."""
 
@@ -46,6 +103,15 @@ class RNAOmniDiffusion(nn.Module):
         pairrefinechannels: int = 16,
         pairrefineblocks: int = 1,
         pairrefinedrop: float = 0.0,
+        use_struct_aux: bool = False,
+        use_query_adapter: bool = False,
+        query_num_queries: int = 4,
+        query_num_heads: int = 4,
+        query_num_layers: int = 1,
+        query_dropout: float = 0.1,
+        query_condition_mode: str = "add",
+        query_alpha: float = 0.05,
+        query_gate_init: float = -4.0,
     ) -> None:
         super().__init__()
         self.vocab_size = vocab_size
@@ -80,6 +146,19 @@ class RNAOmniDiffusion(nn.Module):
         self.sequence_head = nn.Linear(hidden_size, vocab_size)
         self.structure_head = nn.Linear(hidden_size, vocab_size)
         self.general_head = nn.Linear(hidden_size, vocab_size)
+        self.use_struct_aux = use_struct_aux
+        if self.use_struct_aux:
+            self.struct_aux_numeric = nn.Linear(hidden_size, 11)
+            self.struct_aux_categorical = nn.Linear(hidden_size, 4)
+        # Structure Query Adapter
+        self.use_query_adapter = use_query_adapter
+        if self.use_query_adapter:
+            self.query_adapter = StructureQueryAdapter(
+                hidden_size=hidden_size, num_queries=query_num_queries,
+                num_heads=query_num_heads, num_layers=query_num_layers,
+                dropout=query_dropout, condition_mode=query_condition_mode,
+                alpha=query_alpha, gate_init=query_gate_init,
+            )
         if self.use_pair_head:
             pairhidden = int(pairhidden or hidden_size)
             if self.pairhead not in {"bilinear", "mlp", "pairmlp"}:
@@ -156,6 +235,41 @@ class RNAOmniDiffusion(nn.Module):
         pair_logits = None
         if self.use_pair_head and seq_positions is not None:
             pair_logits = self._pair_logits(encoded, seq_positions)
+
+        # Structure Query Adapter
+        query_states = None
+        query_summary = None
+        if self.use_query_adapter:
+            _, query_summary, _ = self.query_adapter(encoded, attention_mask)
+            if pair_logits is not None:
+                mode = self.query_adapter.condition_mode
+                alpha = self.query_adapter.alpha
+                if "filmweak" in mode or "film" == mode:
+                    gb = self.query_adapter.film_proj(query_summary)
+                    gamma = gb[:, 0:1, None, None]
+                    beta = gb[:, 1:2, None, None]
+                    if "filmweak" in mode:
+                        pair_logits = pair_logits * (1.0 + alpha * gamma) + alpha * beta
+                    else:
+                        pair_logits = pair_logits * (1.0 + gamma) + beta
+                elif "biasweak" in mode:
+                    b = self.query_adapter.cond_proj(query_summary).view(-1, 1, 1).sigmoid() - 0.5
+                    pair_logits = pair_logits + alpha * b
+                elif "gated" in mode:
+                    gate = torch.sigmoid(self.query_adapter.gate_param)
+                    b = self.query_adapter.cond_proj(query_summary).view(-1, 1, 1)
+                    pair_logits = pair_logits + gate * b
+                elif "add" == mode:
+                    pair_logits = pair_logits + self.query_adapter.cond_proj(query_summary).view(-1, 1, 1)
+
+        struct_aux_numeric = None
+        struct_aux_categorical = None
+        if self.use_struct_aux:
+            valid_mask = attention_mask.float().unsqueeze(-1)
+            pooled = (encoded * valid_mask).sum(dim=1) / valid_mask.sum(dim=1).clamp_min(1.0)
+            struct_aux_numeric = self.struct_aux_numeric(pooled)
+            struct_aux_categorical = self.struct_aux_categorical(pooled)
+
         return {
             "hidden_states": encoded,
             "token_logits": token_logits,
@@ -163,6 +277,8 @@ class RNAOmniDiffusion(nn.Module):
             "structure_logits": structure_logits,
             "general_logits": general_logits,
             "pair_logits": pair_logits,
+            "struct_aux_numeric": struct_aux_numeric,
+            "struct_aux_categorical": struct_aux_categorical,
         }
 
     def _pair_logits(self, hidden: torch.Tensor, seq_positions: torch.Tensor) -> torch.Tensor:
@@ -277,6 +393,7 @@ def compute_omni_loss(
     pair_pos_weight: torch.Tensor | float | None = None,
     use_pair_loss: bool = True,
     pair_options: dict | None = None,
+    pair_loss_policy: dict | None = None,
 ) -> Dict[str, torch.Tensor]:
     token_logits = outputs["token_logits"]
     labels = batch["labels"].to(token_logits.device)
@@ -325,6 +442,76 @@ def compute_omni_loss(
     if use_pair_loss and pair_logits is not None and loss_mask.any():
         selected_logits = pair_logits.float()[loss_mask] if pair_options.get("pairFloat", True) else pair_logits[loss_mask]
         selected_labels = pair_labels.float()[loss_mask]
+
+        # ---- Pair-Loss Policy: 100% vectorized weight matrix ----
+        plp_stats = {}
+        plp_weight_matrix = None
+        if pair_loss_policy and pair_loss_policy.get("enabled", False):
+            plp = pair_loss_policy
+            device = pair_labels.device
+            B, L, _ = pair_labels.shape
+            pw = float(plp.get("positive_weight", 1.0))
+            nw = float(plp.get("negative_weight", 1.0))
+            hnw = float(plp.get("hard_negative_weight", 1.0))
+            lrt = int(plp.get("long_range_threshold", 64))
+            lrpw = float(plp.get("long_range_positive_weight", 1.0))
+            lrnw = float(plp.get("long_range_negative_weight", 1.0))
+            min_loop = int(plp.get("min_loop", 4))
+
+            # Base weight: positive/negative
+            weight = torch.where(pair_labels > 0.5,
+                                 torch.tensor(pw, device=device, dtype=torch.float32),
+                                 torch.tensor(nw, device=device, dtype=torch.float32))
+
+            # Distance mask (vectorized)
+            idx = torch.arange(L, device=device)
+            dist = (idx.view(1, L) - idx.view(L, 1)).abs()  # [L, L]
+            loop_mask = dist >= min_loop
+            long_mask = dist >= lrt
+
+            # Canonical mask (tensor lookup, no Python for-loop)
+            if hnw != 1.0 or lrpw != 1.0 or lrnw != 1.0:
+                base_to_id = {"A": 0, "U": 1, "G": 2, "C": 3, "N": -1}
+                canonical_table = torch.zeros(4, 4, dtype=torch.bool, device=device)
+                for b1, b2 in [("A","U"),("U","A"),("G","C"),("C","G"),("G","U"),("U","G")]:
+                    canonical_table[base_to_id[b1], base_to_id[b2]] = True
+                canonical_mask = torch.zeros(B, L, L, dtype=torch.bool, device=device)
+                if "raw_seq" in batch:
+                    for b in range(B):
+                        seq = batch["raw_seq"][b] if b < len(batch["raw_seq"]) else ""
+                        slen = len(seq)
+                        if slen == 0: continue
+                        bids = torch.tensor([base_to_id.get(c, -1) for c in seq], device=device)
+                        valid = bids >= 0
+                        # Only use positions within actual sequence length
+                        bi = bids[:slen].unsqueeze(1).expand(slen, slen)
+                        bj = bids[:slen].unsqueeze(0).expand(slen, slen)
+                        cv = valid[:slen].unsqueeze(1) & valid[:slen].unsqueeze(0)
+                        canonical_mask[b, :slen, :slen] = cv & canonical_table[bi.clamp(0,3), bj.clamp(0,3)]
+
+            # Hard negative: canonical & unpaired & valid loop
+            if hnw != 1.0 and "raw_seq" in batch:
+                hard_neg_mask = canonical_mask & (pair_labels <= 0.5) & loop_mask.unsqueeze(0)
+                weight = torch.where(hard_neg_mask,
+                                     torch.tensor(hnw, device=device, dtype=torch.float32),
+                                     weight)
+                plp_stats["hard_negative_count"] = int(hard_neg_mask.sum().item())
+
+            # Long-range weights
+            pos_mask_full = pair_labels > 0.5
+            neg_mask_full = pair_labels <= 0.5
+            if lrpw != 1.0 and "raw_seq" in batch:
+                lr_pos = pos_mask_full & long_mask.unsqueeze(0) & canonical_mask
+                weight = torch.where(lr_pos, torch.tensor(lrpw, device=device, dtype=torch.float32), weight)
+                plp_stats["long_range_positive_count"] = int(lr_pos.sum().item())
+            if lrnw != 1.0 and "raw_seq" in batch:
+                lr_neg = neg_mask_full & long_mask.unsqueeze(0) & canonical_mask
+                weight = torch.where(lr_neg, torch.tensor(lrnw, device=device, dtype=torch.float32), weight)
+                plp_stats["long_range_negative_count"] = int(lr_neg.sum().item())
+
+            plp_stats["positive_weight"] = pw
+            plp_stats["negative_weight"] = nw
+            plp_weight_matrix = weight  # [B, L, L]
         pos_logits = selected_logits[selected_labels > 0.5]
         neg_logits = selected_logits[selected_labels <= 0.5]
         pair_stats["pos"] = selected_logits.new_tensor(float(pos_logits.numel()))
@@ -351,11 +538,67 @@ def compute_omni_loss(
             pos_weight = torch.as_tensor(float(raw_weight), dtype=torch.float32, device=token_logits.device)
             pair_stats["weight"] = pos_weight
         if pos_logits.numel() > 0:
-            pair_loss = F.binary_cross_entropy_with_logits(selected_logits.float(), selected_labels.float(), pos_weight=pos_weight)
+            bce_per = F.binary_cross_entropy_with_logits(
+                selected_logits.float(), selected_labels.float(), reduction="none"
+            )
+            # Composite weight: start with pos_weight for positive class weighting
+            composite_weight = torch.ones_like(bce_per)
+            if pos_weight is not None:
+                composite_weight = torch.where(selected_labels > 0.5,
+                                               pos_weight.to(composite_weight.dtype),
+                                               composite_weight)
+
+            # Layer 1: Pair-Loss Policy weights (if enabled)
+            if plp_weight_matrix is not None:
+                plp_weights = plp_weight_matrix[loss_mask]
+                composite_weight = composite_weight * plp_weights
+
+            # Layer 2: Structural importance weighting (if pair_importance in batch)
+            pair_imp = batch.get("pair_importance")
+            if pair_imp is not None:
+                imp_for_loss = pair_imp.to(bce_per.device)[loss_mask]
+                # Normalize to mean ~1.0 to preserve loss scale
+                imp_mean = torch.clamp(imp_for_loss.mean(), min=1e-8)
+                imp_normalized = imp_for_loss / imp_mean
+                composite_weight = composite_weight * imp_normalized
+
+            pair_loss = (bce_per * composite_weight).sum() / torch.clamp(composite_weight.sum(), min=1.0)
     lambda_conflict = float(pair_options.get("lambdaConflict", 0.0))
     if use_pair_loss and pair_logits is not None and lambda_conflict > 0.0:
         conflict_loss, mean_row_sum, max_row_sum = _conflict_loss(pair_logits, lengths, pair_options)
-    total = token_loss + float(lambda_pair) * pair_loss + lambda_conflict * conflict_loss
+
+    # ---- Pair-Loss Policy: pair-ratio regularizer (safe numerics) ----
+    pair_ratio_loss = token_loss.new_zeros(())
+    isolated_loss = token_loss.new_zeros(())
+    prw = 0.0
+    if pair_logits is not None and pair_loss_policy and pair_loss_policy.get("enabled"):
+        prw = float(pair_loss_policy.get("pair_ratio_weight", 0.0))
+        prt = pair_loss_policy.get("pair_ratio_target")
+        if prw > 0.0 and prt is not None:
+            ratio_target = float(prt)
+            max_aux = float(pair_loss_policy.get("max_aux_loss", 5.0))
+            # Count true pairs from pair_labels (upper triangle)
+            upper_mask = torch.triu(torch.ones_like(pair_labels[0]), diagonal=1).bool()
+            true_count = (pair_labels * upper_mask.unsqueeze(0)).sum()
+            denom = torch.clamp(true_count, min=1.0)
+            pred_probs = torch.sigmoid(pair_logits.float())
+            pred_mass = (pred_probs * upper_mask.unsqueeze(0)).sum()
+            soft_ratio = pred_mass / denom
+            target_mass = denom * ratio_target
+            pair_ratio_loss = F.smooth_l1_loss(
+                torch.clamp(pred_mass, max=target_mass * 3.0),
+                torch.clamp(target_mass, min=0.0, max=pred_mass * 3.0),
+            )
+            pair_ratio_loss = torch.clamp(pair_ratio_loss, max=max_aux)
+            if not torch.isfinite(pair_ratio_loss):
+                pair_ratio_loss = token_loss.new_zeros(())
+            plp_ratio_target = ratio_target
+            plp_stats["pair_ratio_loss"] = float(pair_ratio_loss.detach().cpu())
+            plp_stats["soft_pair_ratio"] = float(soft_ratio.detach().cpu())
+            plp_stats["pred_pair_mass"] = float(pred_mass.detach().cpu())
+            plp_stats["true_pair_count"] = float(true_count.detach().cpu())
+
+    total = token_loss + float(lambda_pair) * pair_loss + lambda_conflict * conflict_loss + prw * pair_ratio_loss
     pair_stats["pos_pair_count"] = pair_stats["pos"]
     pair_stats["neg_pair_count"] = pair_stats["neg"]
     pair_stats["pair_positive_weight_used"] = pair_stats["weight"]
@@ -370,10 +613,15 @@ def compute_omni_loss(
         "token_loss": token_loss.detach(),
         "pair_loss": pair_loss.detach(),
         "conflict_loss": conflict_loss.detach(),
+        "pair_ratio_loss": pair_ratio_loss.detach(),
+        "isolated_loss": isolated_loss.detach(),
         "lambdaConflict": token_loss.new_tensor(lambda_conflict),
         "mean_row_pair_prob_sum": mean_row_sum.detach(),
         "max_row_pair_prob_sum": max_row_sum.detach(),
     }
+    # Add plp_stats
+    for k, v in plp_stats.items():
+        result[f"plp_{k}"] = v
     for key, value in pair_stats.items():
         if torch.is_tensor(value):
             result[key] = value.detach()
