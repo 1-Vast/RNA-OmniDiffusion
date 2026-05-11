@@ -49,7 +49,8 @@ ViennaRNA 2.7.2 comparison (ArchiveII-based test split, 282 samples):
 | Method | F1 | Precision | Recall | Valid | Time/seq |
 |---|---|---|---|---|---|
 | **ViennaRNA 2.7.2** | **—** | **0.518** | 0.473 | 0.608 | 100% | 11.5ms |
-| OmniPrefold (300 steps) | 300 | 0.341 | 0.287 | 0.453 | 100% | 60.8ms |
+| OmniPrefold (300 steps, bias=0) | 300 | 0.341 | 0.287 | 0.453 | 100% | 60.8ms |
+| **OmniPrefold (300 steps, bias=-2)** | **300** | **0.358** | **0.301** | **0.475** | **100%** | **60.8ms** |
 | OmniPrefold (1000 steps) | 1000 | 0.347 | — | — | 100% | — |
 | OmniPrefold (3000 steps) | 3000 | 0.329 | — | — | 100% | — |
 

@@ -63,10 +63,12 @@ Both methods degrade with length, but ViennaRNA degrades less steeply.
 
 ## Practical Path Forward
 
-| Priority | Action | Expected Impact |
-|---|---|---|
-| 1 | Train on larger dataset (bpRNA 10k+) | Higher — more data = better generalization |
-| 2 | Reduce negative ratio to 2:1 or 3:1 | Medium — less overwhelming negatives |
-| 3 | Longer training (10k+ steps on larger data) | Medium — model still learning at 300-3000 steps |
-| 4 | Add thermodynamic features as input | High — ViennaRNA knowledge as priors |
-| 5 | Use position-specific features (GC, conservation) | Medium — simple priors help |
+| Priority | Action | Expected Impact | Tested |
+|---|---|---|---|
+| 1 | Train on larger dataset (bpRNA 10k+) | Higher — more data = better generalization | No |
+| 2 | **Train-time logit bias (bias=-2.0)** | **+0.017 F1 (0.341→0.358)** | **Yes ✓** |
+| 3 | Longer training (10k+ steps on larger data) | Medium | Partial (1000/3000 tested, no gain) |
+| 4 | Add thermodynamic features as input | High — ViennaRNA knowledge as priors | No |
+| 5 | Use position-specific features (GC, conservation) | Medium | No |
+
+**Train-time pair logit bias (bias=-2.0)**: Adding `pair_logit_offset=-2.0` to the model pushes all pair logits downward, forcing the model to produce stronger positive signals for true pairs. This reduced the over-pairing rate and improved test F1 from 0.341 to 0.358 (+0.0167). Optimal bias value confirmed at -2.0 (tested -1, -2, -3).

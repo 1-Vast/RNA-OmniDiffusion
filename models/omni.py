@@ -47,6 +47,7 @@ class RNAOmniDiffusion(nn.Module):
         pairrefineblocks: int = 1,
         pairrefinedrop: float = 0.0,
         pair_arch: str | None = None,
+        pair_logit_offset: float = 0.0,
     ) -> None:
         super().__init__()
         self.vocab_size = vocab_size
@@ -110,6 +111,7 @@ class RNAOmniDiffusion(nn.Module):
                     nn.Linear(pairhidden, 1),
                 )
             self.pair_bias = nn.Parameter(torch.zeros(1))
+            self.pair_logit_offset = pair_logit_offset
             if self.distbias:
                 self.distance_bias = nn.Embedding(self.distbuckets, 1)
             if self.pairrefine:
@@ -194,7 +196,7 @@ class RNAOmniDiffusion(nn.Module):
             left = self.pair_left(seq_hidden)
             right = self.pair_right(seq_hidden)
             logits = torch.matmul(left, right.transpose(1, 2)) / self.pair_scale
-        logits = logits + self.pair_bias
+        logits = logits + self.pair_bias + self.pair_logit_offset
         logits = 0.5 * (logits + logits.transpose(1, 2))
         if self.distbias:
             length = seq_hidden.size(1)

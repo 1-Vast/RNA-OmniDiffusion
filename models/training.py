@@ -279,6 +279,7 @@ def build_model(config: Dict[str, Any], tokenizer: RNAOmniTokenizer, device: tor
         pairrefineblocks=int(model_cfg.get("pairrefineblocks", 1)),
         pairrefinedrop=float(model_cfg.get("pairrefinedrop", 0.0)),
         pair_arch=str(config.get("pair_arch", {}).get("type", "base")) if (config.get("pair_arch", {}).get("enabled", False) or config.get("pair_residual", {}).get("enabled", False)) else None,
+        pair_logit_offset=float(config.get("training", {}).get("pair_logit_offset", 0.0)),
     )
     return model.to(device)
 
