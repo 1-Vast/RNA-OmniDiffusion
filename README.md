@@ -42,6 +42,17 @@ LLM is not part of the validated training or inference pipeline. It may remain u
 
 See `docs/negative.md` for the complete experimental record.
 
+## Benchmark
+
+ViennaRNA 2.7.2 comparison (ArchiveII-based test split, 282 samples):
+
+| Method | F1 | Precision | Recall | Valid | Time/seq |
+|---|---|---|---|---|---|
+| ViennaRNA | 0.518 | 0.473 | 0.608 | 100% | 11.5ms |
+| OmniPrefold (300 steps) | 0.341 | 0.287 | 0.453 | 100% | 60.8ms |
+
+See `docs/benchmark_summary.md` for details.
+
 ## Repository
 
 ```
