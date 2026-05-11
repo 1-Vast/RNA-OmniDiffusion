@@ -136,6 +136,12 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     pa.setdefault("dist_buckets", 32)
     pa.setdefault("distance_threshold", 48)
     pa.setdefault("dropout", 0.0)
+    pr = config.setdefault("pair_residual", {})
+    pr.setdefault("enabled", False)
+    pr.setdefault("type", "conv2d")
+    pr.setdefault("kernel_size", 3)
+    pr.setdefault("residual_scale", 0.1)
+    pr.setdefault("init", "zero")
     return config
 
 
@@ -272,7 +278,7 @@ def build_model(config: Dict[str, Any], tokenizer: RNAOmniTokenizer, device: tor
         pairrefinechannels=int(model_cfg.get("pairrefinechannels", 16)),
         pairrefineblocks=int(model_cfg.get("pairrefineblocks", 1)),
         pairrefinedrop=float(model_cfg.get("pairrefinedrop", 0.0)),
-        pair_arch=str(config.get("pair_arch", {}).get("type", "base")) if config.get("pair_arch", {}).get("enabled", False) else None,
+        pair_arch=str(config.get("pair_arch", {}).get("type", "base")) if (config.get("pair_arch", {}).get("enabled", False) or config.get("pair_residual", {}).get("enabled", False)) else None,
     )
     return model.to(device)
 

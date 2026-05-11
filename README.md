@@ -11,7 +11,9 @@ MS-MPRM + PairRefine + pair-aware masking + corrected lr schedule + strict Nussi
 | Config | lr | Steps | Val F1 | Split |
 |---|---|---|---|---|
 | **mainline_lr0010** | **0.001** | **300** | **0.3184** | val |
-| mainline + pair conv residual | 0.001 | 300 | 0.3312 | val |
+| mainline + pair conv residual (*) | 0.001 | 300 | 0.3312 | val |
+
+(*) Optional experimental module (`pair_residual`, default disabled). Formerly called "stem_continuity_refine". The +0.0128 gain was confirmed, but random-conv control matches it — the gain is from generic 2D conv capacity, not stem-specific bias. See [docs/mainline.md](docs/mainline.md).
 
 ## Quick Start
 

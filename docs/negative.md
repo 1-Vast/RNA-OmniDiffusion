@@ -16,6 +16,7 @@ This document records all experimental routes tested but not adopted as mainline
 | No-LLM structural tagaux | Negative | λ=0.03 unchanged (0.2009), λ=0.20 degrades (0.1899) | Not recommended |
 | LLM structured tags / CLIP | Not entered | No-LLM tagaux showed no positive signal | Deferred |
 | Structural Importance Masking | **Negative** | Rule imp 0.3349 < baseline 0.3406 (-0.0057). Random imp = rule imp. Mechanism confirmed non-beneficial | Closed |
+| Stem continuity refine (as structural bias) | **Not validated** | Gain +0.0128 F1, but random-conv control matches. Capacity effect, not stem-specific bias. | Renamed to pair_residual_conv |
 
 ## Details
 
@@ -49,3 +50,6 @@ Clean comparison at lr=0.001, warmup=50, 300 steps on val split:
 - Random importance: 0.3354 (-0.0052)
 
 Both rule and random importance weighting REDUCE F1 compared to no-weighting baseline. Rule ≈ Random confirms mechanism is not benefiting from structural signal. Root cause: importance scores lack variance (median 0.70, mean 0.82), producing near-uniform pair weights after normalization. Route O closed.
+
+### Stem Continuity Refine (as structural inductive bias)
+Stem continuity refine (2D conv residual on pair logits with anti-diagonal initialization) improved val F1 from 0.3184/0.3223 to 0.3312 (+0.0128) at 300 steps. However, a random-conv control (same parameter count, random initialization) achieved the identical F1=0.3312. Ablation confirmed the gain comes from generic 2D conv residual capacity (+10 params), not from anti-diagonal stem-continuity initialization. The module has been renamed to `pair_residual_conv` and documented as an optional capacity module, not a verified structural inductive bias.
