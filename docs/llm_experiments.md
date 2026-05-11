@@ -38,3 +38,18 @@ Original claim: rule importance F1=0.3331 > baseline 0.3235. **Disproven.** The 
 ## Route P (Stem Continuity Refine) — Detail
 
 Hand-proposed 2D conv residual improved val F1 from 0.3184 to 0.3312 (+0.0128). However, random-conv control achieved identical F1. The gain is generic residual capacity, not stem-specific structural bias. Module renamed to `pair_residual_conv` and kept optional/disabled by default. LLM was not involved in this result.
+
+## Route Q (LLM-Guided Experiment Planner) — Detail
+
+Route Q tested whether LLM can serve as an offline experiment planner, proposing config changes from an allowlisted search space based on aggregated error taxonomy (pair-distance, structure-pattern, sequence-property breakdowns). LLM never enters the model forward or training loop.
+
+**Results (300-step, val split)**:
+- Mainline: F1 = 0.3184
+- Best hand proposal (residual_conv): F1 = 0.3293 (+0.011)
+- Hand lr0012: F1 = 0.2181 (-0.100) — training instability at higher lr
+- LLM proposal (pairrefine 32ch × 2blk, warmup=0): F1 = 0.2431 (-0.075) — larger model fails to converge at 300 steps
+- Other proposals: not fully tested
+
+**Route Q Level: 1** — LLM proposal did not outperform hand proposal or mainline. The winning hand proposal (residual conv) was already known from Route P. LLM's architecture suggestion (wider PairRefine) was counterproductive at 300 steps.
+
+**Conclusion**: LLM remains useful only as an offline assistant/planner, not a validated performance contributor. All routes tested (O, P, Q) confirm that hand-designed approaches match or exceed LLM proposals.

@@ -1,0 +1,104 @@
+[
+  {
+    "name": "random_01",
+    "hypothesis": "Randomly sampled config variant #1",
+    "target_error": [
+      "low_recall"
+    ],
+    "config_changes": {
+      "training": {
+        "lr": 0.001,
+        "warmup_steps": 25
+      }
+    },
+    "expected_effect": "exploratory"
+  },
+  {
+    "name": "random_02",
+    "hypothesis": "Randomly sampled config variant #2",
+    "target_error": [
+      "under_pairing",
+      "fragmented_stem"
+    ],
+    "config_changes": {
+      "training": {
+        "lambda_pair": 3.0,
+        "pair_positive_weight": 15.0
+      }
+    },
+    "expected_effect": "exploratory"
+  },
+  {
+    "name": "random_03",
+    "hypothesis": "Randomly sampled config variant #3",
+    "target_error": [
+      "low_precision"
+    ],
+    "config_changes": {
+      "training": {},
+      "model": {
+        "pairrefine_blocks": 1,
+        "pairrefine_channels": 32
+      }
+    },
+    "expected_effect": "exploratory"
+  },
+  {
+    "name": "random_04",
+    "hypothesis": "Randomly sampled config variant #4",
+    "target_error": [
+      "dense_pairs"
+    ],
+    "config_changes": {
+      "training": {},
+      "model": {
+        "pairrefine_blocks": 3,
+        "pairrefine_channels": 16
+      },
+      "decode": {
+        "nussinov_gamma": 1.0
+      }
+    },
+    "expected_effect": "exploratory"
+  },
+  {
+    "name": "random_05",
+    "hypothesis": "Randomly sampled config variant #5",
+    "target_error": [
+      "sparse_pairs",
+      "long_range"
+    ],
+    "config_changes": {
+      "training": {},
+      "pair_residual": {
+        "enabled": false,
+        "type": "conv2d",
+        "kernel_size": 5,
+        "residual_scale": 0.05,
+        "init": "zero"
+      },
+      "model": {
+        "pairrefine_blocks": 2,
+        "pairrefine_channels": 8
+      }
+    },
+    "expected_effect": "exploratory"
+  },
+  {
+    "name": "random_06",
+    "hypothesis": "Randomly sampled config variant #6",
+    "target_error": [
+      "long_range"
+    ],
+    "config_changes": {
+      "training": {
+        "lr": 0.0015,
+        "warmup_steps": 0
+      },
+      "decode": {
+        "nussinov_gamma": 2.0
+      }
+    },
+    "expected_effect": "exploratory"
+  }
+]
