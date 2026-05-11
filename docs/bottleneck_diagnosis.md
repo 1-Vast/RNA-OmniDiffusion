@@ -71,4 +71,32 @@ Both methods degrade with length, but ViennaRNA degrades less steeply.
 | 4 | Add thermodynamic features as input | High — ViennaRNA knowledge as priors | No |
 | 5 | Use position-specific features (GC, conservation) | Medium | No |
 
-**Train-time pair logit bias (bias=-2.0)**: Adding `pair_logit_offset=-2.0` to the model pushes all pair logits downward, forcing the model to produce stronger positive signals for true pairs. This reduced the over-pairing rate and improved test F1 from 0.341 to 0.358 (+0.0167). Optimal bias value confirmed at -2.0 (tested -1, -2, -3).
+## Multi-Seed Validation (bias=-2.0, 300 steps)
+
+| Seed | offset=0 F1 | offset=-2 F1 | Δ |
+|---|---|---:|---:|
+| 42 | 0.341 | 0.358 | **+0.017** |
+| 123 | 0.329 | 0.228 | -0.101 |
+| 2024 | 0.383 | 0.363 | -0.020 |
+
+| Offset | Mean F1 | Std |
+|---|---|---|
+| 0 | 0.351 | ±0.028 |
+| -2 | 0.316 | ±0.076 |
+
+**Conclusion: bias=-2.0 is NOT robust across seeds.** Seed 123 crashes (F1 drops from 0.329 to 0.228) because the aggressive negative bias prevents the model from learning at certain initializations. The fix helps seed 42 but hurts seeds 123 and 2024.
+
+**Decision: Do NOT enter mainline as default.** Keep `pair_logit_offset: 0.0` as default. The offset parameter can be offered as an optional calibration tuning knob for users who want to experiment, but the validated mainline should use offset=0.
+
+### Fine-Grid Offset Sweep (seed=42, 300 steps)
+
+| Offset | Test F1 |
+|---|---|
+| 0 (default) | 0.341 |
+| -1.0 | 0.312 |
+| -1.5 | 0.341 |
+| -2.0 | **0.358** |
+| -2.5 | 0.342 |
+| -3.0 | 0.339 |
+
+Peak at -2.0 (single seed 42), but this benefit is seed-dependent.

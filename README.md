@@ -49,9 +49,10 @@ ViennaRNA 2.7.2 comparison (ArchiveII-based test split, 282 samples):
 | Method | F1 | Precision | Recall | Valid | Time/seq |
 |---|---|---|---|---|---|
 | **ViennaRNA 2.7.2** | **—** | **0.518** | 0.473 | 0.608 | 100% | 11.5ms |
-| OmniPrefold (300 steps, bias=0) | 300 | 0.341 | 0.287 | 0.453 | 100% | 60.8ms |
-| **OmniPrefold (300 steps, bias=-2)** | **300** | **0.358** | **0.301** | **0.475** | **100%** | **60.8ms** |
+| OmniPrefold (300 steps) | 300 | 0.351* | — | — | 100% | 60.8ms |
 | OmniPrefold (1000 steps) | 1000 | 0.347 | — | — | 100% | — |
+
+*Mean of 3 seeds (42/123/2024): 0.341/0.329/0.383. Single-seed best: 0.383.
 | OmniPrefold (3000 steps) | 3000 | 0.329 | — | — | 100% | — |
 
 Training beyond 300 steps does not improve F1 — the model plateaus around 0.33-0.35, suggesting structural limitations in architecture or data.
