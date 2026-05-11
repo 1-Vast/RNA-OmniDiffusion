@@ -1,0 +1,59 @@
+# RNA-OmniPrefold validated mainline config
+# MS-MPRM + PairRefine + pair-aware masking + corrected lr schedule + strict Nussinov decode
+# All invalid/negative modules disabled or removed.
+data:
+  train_jsonl: dataset/archive/train.jsonl
+  val_jsonl: dataset/archive/val.jsonl
+  test_jsonl: dataset/archive/test.jsonl
+  max_length: 512
+  num_workers: 0
+  pin_memory: false
+
+tasks:
+  seq2struct: 0.35
+  invfold: 0.25
+  inpaint: 0.25
+  motif_control: 0.15
+
+model:
+  hidden_size: 512
+  num_layers: 8
+  num_heads: 8
+  dropout: 0.1
+  max_position_embeddings: 2048
+  distbias: true
+  pairrefine: true
+  pairhead: mlp
+  pairhidden: 512
+  pairdrop: 0.1
+  distbuckets: 32
+  distmax: 512
+  invalidlogit: -20.0
+  pairrefinechannels: 16
+  pairrefineblocks: 1
+  pairrefinedrop: 0.0
+
+training:
+  batch_size: 24
+  epochs: 20
+  lr: 0.001
+  weight_decay: 0.01
+  warmup_steps: 50
+  lambda_pair: 5.0
+  lambda_struct: 1.0
+  lambda_seq: 1.0
+  pair_negative_ratio: 5
+  pair_positive_weight: 10.0
+  structure_positive_weight: 1.0
+  grad_clip: 1.0
+  amp: true
+  seed: 42
+  output_dir: outputs/stem_refine_diag
+
+pair_arch:
+  enabled: true
+  type: stem_continuity_refine
+  dropout: 0.0
+
+debug:
+  check_pair_batch: false

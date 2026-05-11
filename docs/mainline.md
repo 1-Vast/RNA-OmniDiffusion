@@ -69,13 +69,22 @@ python scripts/eval.py bench --config config/mainline_lr0010.yaml --ckpt outputs
 
 ## Architecture Variants (Route P)
 
-Three hand-proposed pair-head architecture variants were tested at 300 steps:
+Three hand-proposed pair-head architecture variants and one random-conv control were tested at 300 steps:
 
-| Architecture | Val F1 | Δ mainline |
-|---|---|---|
-| Mainline (base) | 0.3184 | — |
-| Distance bucket head | 0.3150 | -0.0034 |
-| Long-range gate | 0.3102 | -0.0082 |
-| **Stem continuity refine** | **0.3340** | **+0.0156** |
+| Architecture | Val F1 | Δ mainline | Notes |
+|---|---:|---:|---|
+| Mainline (base) | 0.3184 | — | — |
+| Mainline (fresh run) | 0.3223 | +0.0039 | Run-to-run noise |
+| Distance bucket head | 0.3150 | -0.0034 | Negative |
+| Long-range gate | 0.3102 | -0.0082 | Negative |
+| **Random conv (same params)** | **0.3312** | **+0.0128** | Capacity control |
+| **Stem continuity refine** | **0.3312** | **+0.0128** | Anti-diagonal init |
+| Stem refine (previous run) | 0.3340 | +0.0156 | Prior run, within noise |
 
-Stem continuity refine improves F1 by +0.0156, with the largest gains in fragmented_stem_cases (+0.037) and low_gc_sequences (+0.025).
+### Stem continuity refine validation
+
+Ablation confirmed: stem_continuity_refine (anti-diagonal 2D conv) ≈ random_conv (random init 2D conv, same parameter count). Both achieve F1 ≈ 0.3312, exceeding mainline by +0.0128.
+
+**Conclusion**: The improvement comes from the small 2D conv residual on pair logits (10 parameters), not from the anti-diagonal stem-continuity bias. The module is a valid capacity improvement but is not a stem-specific structural inductive bias.
+
+Recommendation: The 2D conv residual on pair logits may be included as an optional module, but should not be called "stem continuity refine" since the bias is not the active ingredient.

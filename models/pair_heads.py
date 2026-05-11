@@ -78,6 +78,22 @@ class StemContinuityRefine(nn.Module):
         return pair_logits + residual.squeeze(1) * 0.1  # weak residual
 
 
+# ── Random conv control (same params, no anti-diagonal bias) ─────────
+class RandomConvControl(nn.Module):
+    """Same-parameter 2D conv residual, randomly initialized — capacity control."""
+    def __init__(self, dropout: float = 0.0):
+        super().__init__()
+        self.conv = nn.Conv2d(1, 1, kernel_size=3, padding=1)
+        self.drop = nn.Dropout2d(dropout)
+        # Default random init — no structural bias
+
+    def forward(self, pair_logits: torch.Tensor, hidden: torch.Tensor,
+                seq_positions: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+        x = pair_logits.unsqueeze(1)
+        residual = self.conv(self.drop(x))
+        return pair_logits + residual.squeeze(1) * 0.1
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 ARCH_REGISTRY = {
     "base": BasePairArch,
@@ -86,6 +102,7 @@ ARCH_REGISTRY = {
     "long_range_gate": LongRangeGate,
     "stem_continuity_refine": StemContinuityRefine,
     "stem_refine": StemContinuityRefine,
+    "random_conv": RandomConvControl,
 }
 
 

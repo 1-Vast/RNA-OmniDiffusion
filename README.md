@@ -11,7 +11,7 @@ MS-MPRM + PairRefine + pair-aware masking + corrected lr schedule + strict Nussi
 | Config | lr | Steps | Val F1 | Split |
 |---|---|---|---|---|
 | **mainline_lr0010** | **0.001** | **300** | **0.3184** | val |
-| archP_hand_stem (stem refine) | 0.001 | 300 | 0.3340 | val |
+| mainline + pair conv residual | 0.001 | 300 | 0.3312 | val |
 
 ## Quick Start
 
@@ -24,9 +24,9 @@ python scripts/eval.py bench --config config/mainline_lr0010.yaml --ckpt outputs
 
 ## LLM Status
 
-After systematic evaluation of 16+ LLM integration routes (semantic tokens, preference optimization, reranker, curriculum, hard replay curator, decode policy, query adapter, PairLossPolicy, structural auxiliary, macro configuration planner, **structural importance masking**, **architecture hypothesis generator**), **no LLM route demonstrated independent contribution beyond deterministic rule-based baselines or hand-designed architectures**.
+After systematic evaluation of 16+ LLM integration routes (semantic tokens, preference optimization, reranker, curriculum, hard replay curator, decode policy, query adapter, PairLossPolicy, structural auxiliary, macro configuration planner, structural importance masking, **architecture hypothesis generator**), **no LLM route demonstrated independent contribution beyond deterministic rule-based baselines or hand-designed architectures**.
 
-The corrected learning-rate schedule (lr=0.0010, warmup=50) was the most impactful single change. A hand-designed stem-continuity-refine pair-head variant (+0.0156 F1) was identified through Route P error-slice analysis, but LLM-based architecture proposals were not tested yet.
+The corrected learning-rate schedule (lr=0.0010, warmup=50) was the most impactful single change. A small 2D conv residual on pair logits (+10 params) improves val F1 by +0.0128, but this is a capacity effect (random conv matches anti-diagonal conv), not a structural inductive bias.
 
 See [docs/negative.md](docs/negative.md) and [docs/mainline.md](docs/mainline.md) for complete details.
 
