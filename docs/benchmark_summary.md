@@ -1,30 +1,29 @@
 # Benchmark Summary
 
 ## Setup
-
-- **Model**: RNA-OmniPrefold (MS-MPRM + PairRefine + pair-aware masking + lr=0.001 + Nussinov)
-- **Baseline**: ViennaRNA 2.7.2 (minimum free energy, default parameters)
-- **Dataset**: ArchiveII-based local split (282 test samples)
-- **Training**: 300 steps, batch=24, single seed=42
 - **Hardware**: RTX 4060 laptop GPU
+- **Dataset**: ArchiveII-based local split (train=1316, val=282, test=282)
 
 ## Results
 
 ### Overall (test split, 282 samples)
 
-| Method | F1 | Precision | Recall | Valid | Time/seq (ms) |
-|---|---|---|---|---|---|
-| **ViennaRNA** | **0.5179** | 0.4734 | 0.6078 | 100% | 11.5 |
-| OmniPrefold | 0.3409 | 0.2872 | 0.4532 | 100% | 60.8 |
+| Method | Steps | Test F1 | Precision | Recall | Valid | Time/seq |
+|---|---|---|---|---|---|---|
+| **ViennaRNA 2.7.2** | — | **0.5179** | 0.4734 | 0.6078 | 100% | 11.5ms |
+| OmniPrefold | 300 | 0.3409 | 0.2872 | 0.4532 | 100% | 60.8ms |
+| OmniPrefold | 1000 | 0.3472 | — | — | 100% | — |
+| OmniPrefold | 3000 | 0.3285 | — | — | 100% | — |
 
-### Val split (282 samples)
+### Step scaling (val split)
 
-| Method | F1 | Precision | Recall | Valid | Time/seq (ms) |
-|---|---|---|---|---|---|
-| **ViennaRNA** | **0.5011** | 0.4590 | 0.5841 | 100% | 9.8 |
-| OmniPrefold | 0.3220 | 0.2732 | 0.4172 | 100% | 54.4 |
+| Steps | Best Val F1 | Best Epoch |
+|---|---|---|
+| 300 | 0.2963 | 5 |
+| 1000 | 0.3157 | 10 |
+| 3000 | 0.3066 | 6 |
 
-### Length-wise (OmniPrefold, val)
+### Length-wise (OmniPrefold 300-step, val)
 
 | Length bin | N | Mean F1 |
 |---|---|---|
@@ -34,25 +33,15 @@
 
 ## Analysis
 
-1. **ViennaRNA outperforms RNA-OmniPrefold** by ~1.5x on F1 (0.518 vs 0.341 on test). This is expected: ViennaRNA uses decades of thermodynamic parameter optimization, while OmniPrefold trains at 300 steps from scratch.
-
-2. **Length degradation**: OmniPrefold's F1 drops sharply with sequence length (0.418 → 0.327 → 0.191), suggesting insufficient long-range interaction modeling at 300 training steps.
-
-3. **Both methods achieve 100% valid structures** via Nussinov decoding.
-
-4. **Runtime**: ViennaRNA is ~5x faster (11.5 ms vs 60.8 ms per sequence on GPU).
+1. **ViennaRNA is ~1.52x better** than OmniPrefold on test F1 (0.518 vs 0.341 at 300 steps).
+2. **Training steps beyond 300 do not help**: F1 plateaus around 0.33-0.35 regardless of training budget (300, 1000, 3000 steps).
+3. **Long-sequence degradation** is the primary failure mode: F1 drops from 0.418 (short) to 0.191 (long).
+4. **Valid structure rate is 100%** for both methods via Nussinov decoding.
+5. **The neural model is structurally limited** — current architecture/data may be insufficient to learn thermodynamic folding principles that ViennaRNA encodes via hand-tuned energy parameters.
 
 ## Limitations
+- Single seed (42); no multi-seed statistics
+- Family field unavailable in local dataset (all "OTHER")
+- Only ArchiveII-based local split; no public benchmark splits
+- No LinearFold/CONTRAfold/EternaFold comparison (not installed)
 
-- Single seed (42), no multi-seed statistics
-- 300 training steps only (insufficient for full convergence)
-- ArchiveII-based local split, not public benchmark splits
-- No multi-seed training, no family-wise breakdown (family field empty)
-
-## Next Steps (if pursued)
-
-1. Train to convergence (1000-5000 steps) for fair comparison with thermodynamics
-2. Multi-seed (42, 123, 2024) for mean ± std
-3. Public benchmark splits (bpRNA, RNAStrAlign)
-4. Additional baselines (LinearFold, CONTRAfold)
-5. Family-wise and pseudoknot analysis
