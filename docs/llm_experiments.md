@@ -53,3 +53,11 @@ Route Q tested whether LLM can serve as an offline experiment planner, proposing
 **Route Q Level: 1** — LLM proposal did not outperform hand proposal or mainline. The winning hand proposal (residual conv) was already known from Route P. LLM's architecture suggestion (wider PairRefine) was counterproductive at 300 steps.
 
 **Conclusion**: LLM remains useful only as an offline assistant/planner, not a validated performance contributor. All routes tested (O, P, Q) confirm that hand-designed approaches match or exceed LLM proposals.
+
+**Route Q updated results (v2, with fixed LLM planner)**:
+- Mainline: 0.3184
+- Hand_residual_conv: 0.3293 (+0.011)
+- LLM_Tune_lr_lambda (lr=0.0008, lambda_pair=7.0): 0.3235 (+0.0051)
+- LLM_Enable_pair_residual (kernel_size=5): 0.3160 (-0.0024)
+
+Best LLM proposal (+0.0051) exceeded mainline but did not exceed best hand proposal. Route Q remains **Level 1**: LLM planner has no independent advantage over hand planner.

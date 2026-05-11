@@ -180,55 +180,50 @@ def generate_llm_proposals(searchspace: dict, error_report: dict, num: int) -> l
         print("LLM credentials not found; skipping LLM proposals.")
         return []
 
-    # Build prompt
-    ss_yaml = yaml.dump({"search_space": searchspace}, sort_keys=False)
-    # Filter error report to keep it compact
-    compact = {
-        "overall": error_report.get("overall", {}),
-        "pair_distance": error_report.get("pair_distance", {}),
-        "structure_pattern": error_report.get("structure_pattern", {}),
-        "calibration": error_report.get("calibration", {}),
+    # Compact error taxonomy — only key numbers
+    overall = error_report.get("overall", {})
+    dist = error_report.get("pair_distance", {})
+    pat = error_report.get("structure_pattern", {})
+
+    # Compact search space as flat key-value ranges
+    ss_compact = {
+        "training.lr": searchspace.get("training", {}).get("lr", []),
+        "training.warmup_steps": searchspace.get("training", {}).get("warmup_steps", []),
+        "model.pairrefine_blocks": searchspace.get("model", {}).get("pairrefine_blocks", []),
+        "model.pairrefine_channels": searchspace.get("model", {}).get("pairrefine_channels", []),
+        "pair_residual.enabled": [False, True],
+        "pair_residual.kernel_size": searchspace.get("pair_residual", {}).get("kernel_size", []),
+        "decode.nussinov_gamma": searchspace.get("decode", {}).get("nussinov_gamma", []),
+        "training.lambda_pair": searchspace.get("loss", {}).get("lambda_pair", []),
     }
 
-    prompt = {
-        "validated_mainline": {
-            "model": "MS-MPRM + PairRefine + pair-aware masking + corrected lr schedule + strict Nussinov",
-            "val_f1": error_report.get("overall", {}).get("f1", "unknown"),
-            "notes": "LLM is not used inside the model.",
+    prompt = json.dumps({
+        "task": f"Propose exactly {num} experiments to improve RNA folding model F1. The model is MS-MPRM + PairRefine with strict Nussinov decode. Current val F1 is {overall.get('f1','?')}. Precision={overall.get('precision','?')}, Recall={overall.get('recall','?')}.",
+        "error_summary": {
+            "pair_distance": {k: {"f1": v["f1"], "support": v["support"]} for k, v in dist.items()},
+            "structure_pattern": {k: {"count": v["count"], "f1": v.get("mean_f1")} for k, v in pat.items()},
         },
-        "failed_routes": [
-            "semantic_tokens", "preference_loss", "reranker", "hard_replay",
-            "decode_policy", "query_adapter", "tag_aux", "importance_weighting",
-            "synthetic_only",
-        ],
-        "error_taxonomy": compact,
-        "allowed_search_space_yaml": ss_yaml,
-        "task": f"Propose at most {num} small experiments likely to improve validation F1. "
-                "Use only allowed config fields. Prefer minimal changes. "
-                "Explain the target error mode. Return strict JSON only.",
-    }
+        "allowed_fields": ss_compact,
+        "output_format": '{"proposals": [{"name": "...", "hypothesis": "...", "target_error": ["..."], "config_changes": {"training": {"lr": 0.001}, "model": {"pairrefine_channels": 32}}, "expected_effect": "..."}]}',
+        "rules": ["Use only allowed_fields values", "Prefer 1-2 changes per proposal", f"Return {num} proposals in strict JSON"],
+    })
 
-    system_msg = (
-        "You are an RNA secondary-structure model experiment planner. "
-        "You do not predict structures, do not label pairs, do not select samples, "
-        "and do not modify code. You only propose small experiments from an allowlisted "
-        "search space based on aggregated error statistics. Return strict JSON only."
-    )
+    system_msg = "You are an experiment planner for RNA folding models. Return strict JSON only. No markdown, no explanation outside the JSON."
 
     import urllib.request
-    payload = json.dumps({
+    payload_bytes = json.dumps({
         "model": model_id,
         "messages": [
             {"role": "system", "content": system_msg},
-            {"role": "user", "content": json.dumps(prompt, indent=2)},
+            {"role": "user", "content": prompt},
         ],
-        "temperature": 0.3, "max_tokens": 2000,
+        "temperature": 0.3, "max_tokens": 1500,
     }).encode()
 
     try:
         req = urllib.request.Request(
             f"{base_url.rstrip('/')}/v1/chat/completions",
-            data=payload,
+            data=payload_bytes,
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         )
         with urllib.request.urlopen(req, timeout=60) as resp:
