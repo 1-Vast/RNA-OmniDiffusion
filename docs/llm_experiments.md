@@ -83,3 +83,21 @@ Route R tested whether LLM can serve as an implementation audit assistant, propo
 - LLM audit: 6 hypotheses, 0 confirmed (all unknown ¡ª no matching programmatic checks)
 
 **Route R Level: 1** ¡ª LLM did not identify bugs that hand audit missed. Hand audit found a real (minor) min_loop alignment issue where 28 val-set pairs have |i-j| < decode min_loop=3, meaning the model trains on pairs it cannot decode. LLM hypotheses could not be programmatically verified.
+
+
+
+## Route S (LLM Causal Reasoning Planner) ¡ª Detail
+
+Route S tested whether LLM can serve as a causal reasoning planner, inferring mechanisms from structured experiment history and proposing minimal controlled experiments. LLM never enters model forward or training.
+
+**Framework**: history_pack.py ¡ú routeS_reasoner.py ¡ú routeS_materialize.py ¡ú eval/train
+
+**Results**:
+- Hand: 6 causal hypotheses (min_loop, checkpoint, decode_calib, pairrefine, lambda, warmup)
+- Random: 6 hypotheses
+- LLM: 4 valid JSON hypotheses (fix min_loop, calibrate decode, increase pairrefine, adjust pair loss)
+- Materialized: 16 experiments (13 train, 3 eval-only)
+- Eval-only decode calibration (gamma 1.0/2.0/3.0): no effect (F1=0.3321 constant)
+- Train experiments: not executed
+
+**Route S Level: 1** ¡ª LLM causal hypotheses similar to hand, no demonstrated advantage. The framework (structured history ¡ú reasoning ¡ú experiments) is useful as an offline planning tool but LLM reasoning does not exceed hand reasoning.
