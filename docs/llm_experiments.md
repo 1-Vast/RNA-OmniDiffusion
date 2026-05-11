@@ -61,3 +61,12 @@ Route Q tested whether LLM can serve as an offline experiment planner, proposing
 - LLM_Enable_pair_residual (kernel_size=5): 0.3160 (-0.0024)
 
 Best LLM proposal (+0.0051) exceeded mainline but did not exceed best hand proposal. Route Q remains **Level 1**: LLM planner has no independent advantage over hand planner.
+
+**Route Q Combo Test (fresh mainline comparison)**:
+Fresh mainline 300-step training achieved F1=0.3321 — exceeding all modification runs:
+- Mainline: 0.3321
+- Combo (LLM tune + residual): 0.3314 (-0.0007)
+- Hand residual: 0.3293 (-0.0028)
+- LLM tune only: 0.3235 (-0.0086)
+
+No modification clearly exceeds mainline. All differences within run-to-run training noise (~0.014 F1). Previously observed "gains" were likely within noise. Route Q Level 0/1.
