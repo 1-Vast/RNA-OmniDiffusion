@@ -130,29 +130,12 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     plp.setdefault("schedule", "constant")
     plp.setdefault("max_aux_loss", 5.0)
     plp.setdefault("log_stats", True)
-    sa = config.setdefault("struct_aux", {})
-    sa.setdefault("enabled", False)
-    sa.setdefault("lambda_numeric", 0.03)
-    sa.setdefault("lambda_categorical", 0.03)
-    sa.setdefault("hidden_dim", 256)
-    sa.setdefault("start_epoch_ratio", 0.0)
-    sa.setdefault("pool", "mean")
-    qa = config.setdefault("query_adapter", {})
-    qa.setdefault("enabled", False)
-    qa.setdefault("num_queries", 4)
-    qa.setdefault("num_heads", 4)
-    qa.setdefault("num_layers", 1)
-    qa.setdefault("dropout", 0.1)
-    qa.setdefault("condition_mode", "add")
-    qa.setdefault("alpha", 0.05)
-    qa.setdefault("gate_init", -4.0)
-    qa.setdefault("start_step", 0)
-    qa.setdefault("use_tag_aux", False)
-    qa.setdefault("lambda_tag", 0.0)
-    qa.setdefault("condition_pair", True)
-    si = config.setdefault("structural_importance", {})
-    si.setdefault("enabled", False)
-    si.setdefault("weight_strength", 1.0)
+    pa = config.setdefault("pair_arch", {})
+    pa.setdefault("enabled", False)
+    pa.setdefault("type", "base")
+    pa.setdefault("dist_buckets", 32)
+    pa.setdefault("distance_threshold", 48)
+    pa.setdefault("dropout", 0.0)
     return config
 
 
@@ -289,15 +272,7 @@ def build_model(config: Dict[str, Any], tokenizer: RNAOmniTokenizer, device: tor
         pairrefinechannels=int(model_cfg.get("pairrefinechannels", 16)),
         pairrefineblocks=int(model_cfg.get("pairrefineblocks", 1)),
         pairrefinedrop=float(model_cfg.get("pairrefinedrop", 0.0)),
-        use_struct_aux=bool(config.get("struct_aux", {}).get("enabled", False)),
-        use_query_adapter=bool(config.get("query_adapter", {}).get("enabled", False)),
-        query_num_queries=int(config.get("query_adapter", {}).get("num_queries", 4)),
-        query_num_heads=int(config.get("query_adapter", {}).get("num_heads", 4)),
-        query_num_layers=int(config.get("query_adapter", {}).get("num_layers", 1)),
-        query_dropout=float(config.get("query_adapter", {}).get("dropout", 0.1)),
-        query_condition_mode=str(config.get("query_adapter", {}).get("condition_mode", "add")),
-        query_alpha=float(config.get("query_adapter", {}).get("alpha", 0.05)),
-        query_gate_init=float(config.get("query_adapter", {}).get("gate_init", -4.0)),
+        pair_arch=str(config.get("pair_arch", {}).get("type", "base")) if config.get("pair_arch", {}).get("enabled", False) else None,
     )
     return model.to(device)
 
@@ -345,7 +320,6 @@ def make_loader(
     tokenizer: RNAOmniTokenizer,
     config: Dict[str, Any],
     shuffle: bool,
-    typed_spec=None,
 ) -> DataLoader:
     training_cfg = config["training"]
     data_cfg = config.get("data", {})
@@ -363,7 +337,6 @@ def make_loader(
         pair_negative_ratio=int(training_cfg.get("pair_negative_ratio", training_cfg.get("pairRatio", 3))),
         seed=int(training_cfg.get("seed", 42)),
         ablation=config.get("ablation", {}),
-        typed_spec=typed_spec,
         relation_mask=config.get("relation_mask", {}),
     )
     if config.get("data", {}).get("length_grouping", False):
@@ -538,7 +511,6 @@ def estimate_loss_options(config: Dict[str, Any], dataset: RNAOmniDataset, token
         and bool(config.get("ablation", {}).get("use_pair_head", True)),
         "structure_bracket_weight": float(bracket_weight),
         "pair_loss_policy": config.get("pair_loss_policy", {}),
-        "struct_aux": config.get("struct_aux", {}),
     }
 
 
@@ -846,62 +818,8 @@ def train_model(
             model.load_state_dict(checkpoint["model_state"], strict=False)
             pretrain_load_report = {"loaded": list(checkpoint["model_state"]), "skipped": []}
             print(f"Loaded pretrain weights from {init_from_pretrain}.")
-    # -- typed data training ---------------------------------------------------
-    typed_cfg = config.get("typed", {})
-    typed_enabled = bool(typed_cfg.get("enabled", False))
-    typed_spec_path = typed_cfg.get("spec_path")
-    typed_spec = None
-    if typed_enabled and typed_spec_path:
-        from models.spec import TypedSpec
-        typed_spec = TypedSpec(typed_spec_path)
-        print(f"Typed spec loaded: {len(typed_spec)} entries from {typed_spec_path}")
-        # Check coverage on training set
-        train_ids = [s.get("id", "") for s in train_dataset.samples[:min(500, len(train_dataset))]]
-        typed_spec.reset_diagnostics()
-        for sid in train_ids:
-            typed_spec.get(sid)
-        cov = typed_spec.coverage_report()
-        print(f"Typed coverage check: {cov['coverage']:.1%} ({cov['hits']}/{cov['total_lookups']} samples matched)")
-        if cov["coverage"] == 0:
-            print("WARNING: typed spec enabled but no sample ids matched! Check --check-match")
-        typed_spec.reset_diagnostics()
-    else:
-        typed_enabled = False
-
-    # -- coach policy ---------------------------------------------------------
-    policy_cfg = config.get("policy", {})
-    policy_enabled = bool(policy_cfg.get("enabled", False))
-    policy_data = None
-    if policy_enabled and policy_cfg.get("path"):
-        from models.spec import load_policy
-        policy_data = load_policy(policy_cfg["path"])
-        if policy_data:
-            print(f"Coach policy loaded: {policy_data.get('policy_name','?')} "
-                  f"src={policy_data.get('_source','?')} conf={policy_data.get('confidence',0):.2f}")
-        else:
-            policy_enabled = False
-
-    train_loader = make_loader(train_dataset_for_loader, tokenizer, config, shuffle=True,
-                               typed_spec=typed_spec)
+    train_loader = make_loader(train_dataset_for_loader, tokenizer, config, shuffle=True)
     val_loader = make_loader(val_dataset, tokenizer, config, shuffle=False)
-
-    # -- preference buffer ---------------------------------------------------
-    pref_cfg = config.get("preference", {})
-    pref_enabled = bool(pref_cfg.get("enabled", False))
-    pref_beta = float(pref_cfg.get("beta", 0.05))
-    pref_min_conf = float(pref_cfg.get("min_confidence", 0.6))
-    pref_start_ratio = float(pref_cfg.get("start_epoch_ratio", 0.3))
-    pref_epoch_start = max(1, int(int(config["training"]["epochs"]) * pref_start_ratio))
-    pref_lookup: dict = {}
-    if pref_enabled:
-        bp = pref_cfg.get("buffer_path")
-        if bp:
-            from models.pref import load_buffer, build_lookup
-            buffer = load_buffer(bp)
-            pref_lookup = build_lookup(buffer, min_confidence=pref_min_conf)
-            print(f"Preference buffer loaded: {len(pref_lookup)} entries from {bp} (beta={pref_beta}, min_conf={pref_min_conf}, start_epoch={pref_epoch_start})")
-        else:
-            pref_enabled = False
 
     if config.get("debug", {}).get("check_pair_batch", False):
         print_pair_batch_debug(next(iter(train_loader)))
@@ -971,57 +889,6 @@ def train_model(
                 outputs = forward_model(model, batch)
                 loss_dict = loss_from_batch(outputs, batch, loss_options)
                 loss = loss_dict["loss"]
-
-                # -- curriculum weight (Route A) --
-                if "_cur_weight" in batch:
-                    cw = batch["_cur_weight"].to(device).float().mean()
-                    loss = loss * cw
-
-                # -- struct_aux loss (structural tag supervision) -----------
-                struct_aux_cfg = config.get("struct_aux", {})
-                sa_loss_val = torch.tensor(0.0, device=device)
-                if struct_aux_cfg.get("enabled", False) and "struct_numeric" in batch:
-                    l_num = float(struct_aux_cfg.get("lambda_numeric", 0.03))
-                    l_cat = float(struct_aux_cfg.get("lambda_categorical", 0.03))
-                    sa_start = max(1, int(int(config["training"]["epochs"]) * float(struct_aux_cfg.get("start_epoch_ratio", 0.0))))
-                    if epoch >= sa_start:
-                        struct_num = batch["struct_numeric"].to(device)
-                        struct_cat = batch["struct_categorical"].to(device)
-                        pred_num = outputs.get("struct_numeric")
-                        pred_cat = outputs.get("struct_categorical")
-                        if pred_num is not None and pred_cat is not None:
-                            l_num_loss = torch.nn.functional.smooth_l1_loss(pred_num.float(), struct_num.float())
-                            l_cat_loss = torch.nn.functional.cross_entropy(pred_cat.float(), struct_cat.long())
-                            sa_loss_val = l_num * l_num_loss + l_cat * l_cat_loss
-                            loss = loss + sa_loss_val
-                            loss_dict["struct_aux_loss"] = sa_loss_val.detach()
-                            loss_dict["struct_numeric_loss"] = l_num_loss.detach()
-                            loss_dict["struct_categorical_loss"] = l_cat_loss.detach()
-
-                # -- sample-level weight from LLM clarity scoring ------------
-                if "_weight" in batch:
-                    sw = batch["_weight"].to(device).float()
-                    loss = loss * sw.mean()
-
-                # -- preference loss (optional, epoch-gated) -----------------
-                pref_loss_val = torch.tensor(0.0, device=device)
-                pref_covered = 0
-                if pref_enabled and pref_lookup and epoch >= pref_epoch_start:
-                    pair_logits = outputs.get("pair_logits")
-                    if pair_logits is not None:
-                        from models.pref import compute_batch_pref_loss
-                        pf, pc = compute_batch_pref_loss(
-                            pair_logits,
-                            batch.get("sample_ids", []),
-                            batch["lengths"],
-                            pref_lookup,
-                        )
-                        if pc > 0:
-                            pref_loss_val = pf
-                            pref_covered = pc
-                            loss = loss + pref_beta * pref_loss_val
-                loss_dict["pref_loss"] = pref_loss_val.detach()
-                loss_dict["pref_covered"] = pref_covered
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), float(config["training"].get("grad_clip", 1.0)))
@@ -1031,16 +898,12 @@ def train_model(
             global_step += 1
             update_running(train_totals, loss_dict, int(batch["input_ids"].size(0)))
             if global_step == 1 or global_step % log_every == 0:
-                pref_str = ""
-                if loss_dict.get("pref_covered", 0) > 0:
-                    pref_str = f" pref={float(loss_dict['pref_loss'].cpu()):.4f} pref_cov={loss_dict['pref_covered']}"
                 print(
                     f"step={global_step} epoch={epoch} "
                     f"loss={float(loss.detach().cpu()):.4f} "
                     f"token={float(loss_dict['token_loss'].cpu()):.4f} "
                     f"pair={float(loss_dict['pair_loss'].cpu()):.4f} "
                     f"conflict={float(loss_dict['conflict_loss'].cpu()):.4f}"
-                    f"{pref_str}"
                 )
             if max_steps is not None and global_step >= max_steps:
                 break
@@ -1086,24 +949,7 @@ def train_model(
             "load_encoder_only": bool(config["training"].get("load_encoder_only", False)),
             "pretrain_loaded_keys": len(pretrain_load_report["loaded"]) if pretrain_load_report else 0,
             "pretrain_skipped_keys": len(pretrain_load_report["skipped"]) if pretrain_load_report else 0,
-            "pref_enabled": pref_enabled,
-            "pref_beta": pref_beta if pref_enabled else 0.0,
-            "pref_epoch_start": pref_epoch_start if pref_enabled else 0,
-            "typed_enabled": typed_enabled,
-            "typed_entries": len(typed_spec) if typed_spec else 0,
         }
-        # Typed diagnostics at end of each epoch
-        if typed_enabled and typed_spec is not None:
-            cov = typed_spec.coverage_report()
-            epoch_metrics["typed_coverage"] = cov["coverage"]
-            epoch_metrics["typed_hits"] = cov["hits"]
-            epoch_metrics["typed_misses"] = cov["misses"]
-            epoch_metrics["typed_hit_by_id"] = cov["hit_by_id"]
-            epoch_metrics["typed_hit_by_family"] = cov["hit_by_family"]
-            epoch_metrics["typed_hit_by_source"] = cov["hit_by_source"]
-            if epoch == start_epoch:
-                print(f"Typed epoch-1 stats: coverage={cov['coverage']:.1%} hits={cov['hits']} misses={cov['misses']} id={cov['hit_by_id']} family={cov['hit_by_family']} source={cov['hit_by_source']}")
-            typed_spec.reset_diagnostics()
         history.append(epoch_metrics)
         print(epoch_line(epoch_metrics, epoch, int(config["training"]["epochs"])))
         warn_if_collapsed(epoch_metrics)

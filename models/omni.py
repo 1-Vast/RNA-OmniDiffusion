@@ -21,63 +21,6 @@ class PairRefineBlock(nn.Module):
         return logits + self.net(logits.unsqueeze(1)).squeeze(1)
 
 
-class StructureQueryAdapter(nn.Module):
-    """Learnable structure queries with cross-attention to encoder states.
-    Inspired by Q-former / multimodal adapter design. No LLM dependency.
-    """
-    def __init__(self, hidden_size=512, num_queries=4, num_heads=4,
-                 num_layers=1, dropout=0.1, condition_mode="add",
-                 alpha=0.05, gate_init=-4.0):
-        super().__init__()
-        self.num_queries = num_queries
-        self.condition_mode = condition_mode
-        self.alpha = alpha
-        self.query_embed = nn.Parameter(torch.randn(1, num_queries, hidden_size) * 0.02)
-        self.cross_attn = nn.MultiheadAttention(hidden_size, num_heads,
-                                                 dropout=dropout, batch_first=True)
-        self.attn_norm = nn.LayerNorm(hidden_size)
-        self.ffn = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size * 4), nn.GELU(),
-            nn.Dropout(dropout), nn.Linear(hidden_size * 4, hidden_size),
-        )
-        self.ffn_norm = nn.LayerNorm(hidden_size)
-        # Pair conditioning projections -- initialized near zero for weak modes
-        if "filmweak" in condition_mode or "film" == condition_mode:
-            self.film_proj = nn.Sequential(
-                nn.Linear(hidden_size, hidden_size), nn.GELU(),
-                nn.Linear(hidden_size, 2),
-            )
-            # Initialize last layer to zero
-            nn.init.zeros_(self.film_proj[-1].weight)
-            nn.init.zeros_(self.film_proj[-1].bias)
-        else:
-            self.cond_proj = nn.Sequential(
-                nn.Linear(hidden_size, hidden_size), nn.GELU(),
-                nn.Linear(hidden_size, 1),
-            )
-            nn.init.zeros_(self.cond_proj[-1].weight)
-            nn.init.zeros_(self.cond_proj[-1].bias)
-        # Gated mode
-        if "gated" in condition_mode:
-            self.gate_param = nn.Parameter(torch.tensor(gate_init))
-
-    def forward(self, encoder_hidden, attention_mask=None):
-        B = encoder_hidden.size(0)
-        q = self.query_embed.expand(B, -1, -1)  # [B, M, H]
-        key_padding = (attention_mask == 0) if attention_mask is not None else None
-        attn_out, _ = self.cross_attn(q, encoder_hidden, encoder_hidden,
-                                       key_padding_mask=key_padding)
-        q = self.attn_norm(q + attn_out)
-        q = self.ffn_norm(q + self.ffn(q))
-        query_summary = q.mean(dim=1)  # [B, H]
-        proj_out = query_summary
-        if hasattr(self, 'cond_proj'):
-            proj_out = self.cond_proj(query_summary)
-        elif hasattr(self, 'film_proj'):
-            proj_out = query_summary
-        return q, query_summary, proj_out
-
-
 class RNAOmniDiffusion(nn.Module):
     """RNA-OmniPrefold relation-aware masked denoising model for RNA folding."""
 
@@ -103,15 +46,7 @@ class RNAOmniDiffusion(nn.Module):
         pairrefinechannels: int = 16,
         pairrefineblocks: int = 1,
         pairrefinedrop: float = 0.0,
-        use_struct_aux: bool = False,
-        use_query_adapter: bool = False,
-        query_num_queries: int = 4,
-        query_num_heads: int = 4,
-        query_num_layers: int = 1,
-        query_dropout: float = 0.1,
-        query_condition_mode: str = "add",
-        query_alpha: float = 0.05,
-        query_gate_init: float = -4.0,
+        pair_arch: str | None = None,
     ) -> None:
         super().__init__()
         self.vocab_size = vocab_size
@@ -146,19 +81,6 @@ class RNAOmniDiffusion(nn.Module):
         self.sequence_head = nn.Linear(hidden_size, vocab_size)
         self.structure_head = nn.Linear(hidden_size, vocab_size)
         self.general_head = nn.Linear(hidden_size, vocab_size)
-        self.use_struct_aux = use_struct_aux
-        if self.use_struct_aux:
-            self.struct_aux_numeric = nn.Linear(hidden_size, 11)
-            self.struct_aux_categorical = nn.Linear(hidden_size, 4)
-        # Structure Query Adapter
-        self.use_query_adapter = use_query_adapter
-        if self.use_query_adapter:
-            self.query_adapter = StructureQueryAdapter(
-                hidden_size=hidden_size, num_queries=query_num_queries,
-                num_heads=query_num_heads, num_layers=query_num_layers,
-                dropout=query_dropout, condition_mode=query_condition_mode,
-                alpha=query_alpha, gate_init=query_gate_init,
-            )
         if self.use_pair_head:
             pairhidden = int(pairhidden or hidden_size)
             if self.pairhead not in {"bilinear", "mlp", "pairmlp"}:
@@ -195,6 +117,12 @@ class RNAOmniDiffusion(nn.Module):
                     PairRefineBlock(int(pairrefinechannels), float(pairrefinedrop))
                     for _ in range(max(1, int(pairrefineblocks)))
                 )
+        # Optional pair-architecture add-on
+        self.pair_arch = None
+        if pair_arch and pair_arch != "base":
+            from models.pair_heads import build_pair_arch
+            self.pair_arch = build_pair_arch({"pair_arch": {"enabled": True, "type": pair_arch}})
+            self._pair_arch_type = pair_arch
 
     def forward(
         self,
@@ -235,40 +163,11 @@ class RNAOmniDiffusion(nn.Module):
         pair_logits = None
         if self.use_pair_head and seq_positions is not None:
             pair_logits = self._pair_logits(encoded, seq_positions)
-
-        # Structure Query Adapter
-        query_states = None
-        query_summary = None
-        if self.use_query_adapter:
-            _, query_summary, _ = self.query_adapter(encoded, attention_mask)
-            if pair_logits is not None:
-                mode = self.query_adapter.condition_mode
-                alpha = self.query_adapter.alpha
-                if "filmweak" in mode or "film" == mode:
-                    gb = self.query_adapter.film_proj(query_summary)
-                    gamma = gb[:, 0:1, None, None]
-                    beta = gb[:, 1:2, None, None]
-                    if "filmweak" in mode:
-                        pair_logits = pair_logits * (1.0 + alpha * gamma) + alpha * beta
-                    else:
-                        pair_logits = pair_logits * (1.0 + gamma) + beta
-                elif "biasweak" in mode:
-                    b = self.query_adapter.cond_proj(query_summary).view(-1, 1, 1).sigmoid() - 0.5
-                    pair_logits = pair_logits + alpha * b
-                elif "gated" in mode:
-                    gate = torch.sigmoid(self.query_adapter.gate_param)
-                    b = self.query_adapter.cond_proj(query_summary).view(-1, 1, 1)
-                    pair_logits = pair_logits + gate * b
-                elif "add" == mode:
-                    pair_logits = pair_logits + self.query_adapter.cond_proj(query_summary).view(-1, 1, 1)
-
-        struct_aux_numeric = None
-        struct_aux_categorical = None
-        if self.use_struct_aux:
-            valid_mask = attention_mask.float().unsqueeze(-1)
-            pooled = (encoded * valid_mask).sum(dim=1) / valid_mask.sum(dim=1).clamp_min(1.0)
-            struct_aux_numeric = self.struct_aux_numeric(pooled)
-            struct_aux_categorical = self.struct_aux_categorical(pooled)
+            if self.pair_arch is not None:
+                lengths = torch.tensor([(seq_positions[b] >= 0).sum().item()
+                                        for b in range(seq_positions.shape[0])],
+                                       device=pair_logits.device, dtype=torch.long)
+                pair_logits = self.pair_arch(pair_logits, encoded, seq_positions, lengths)
 
         return {
             "hidden_states": encoded,
@@ -277,8 +176,6 @@ class RNAOmniDiffusion(nn.Module):
             "structure_logits": structure_logits,
             "general_logits": general_logits,
             "pair_logits": pair_logits,
-            "struct_aux_numeric": struct_aux_numeric,
-            "struct_aux_categorical": struct_aux_categorical,
         }
 
     def _pair_logits(self, hidden: torch.Tensor, seq_positions: torch.Tensor) -> torch.Tensor:
