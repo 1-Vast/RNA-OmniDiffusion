@@ -1,0 +1,94 @@
+# Scaled model: 14L, 640H, 3x PairRefine, fits 8GB
+data:
+  train_jsonl: dataset/archive/train.jsonl
+  val_jsonl: dataset/archive/val.jsonl
+  test_jsonl: dataset/archive/test.jsonl
+  max_length: 512
+  num_workers: 0
+  pin_memory: false
+
+tasks:
+  seq2struct: 0.35
+  invfold: 0.25
+  inpaint: 0.25
+  motif_control: 0.15
+
+model:
+  hidden_size: 640
+  num_layers: 14
+  num_heads: 10
+  dropout: 0.1
+  max_position_embeddings: 2048
+  distbias: true
+  pairrefine: true
+  pairhead: mlp
+  pairhidden: 640
+  pairdrop: 0.1
+  distbuckets: 32
+  distmax: 512
+  invalidlogit: -20.0
+  pairrefinechannels: 32
+  pairrefineblocks: 3
+  pairrefinedrop: 0.0
+
+training:
+  batch_size: 8
+  epochs: 40
+  lr: 0.001
+  weight_decay: 0.01
+  warmup_steps: 100
+  lambda_pair: 5.0
+  lambda_struct: 1.0
+  lambda_seq: 1.0
+  pair_negative_ratio: 5
+  pair_positive_weight: 10.0
+  structure_positive_weight: 1.0
+  grad_clip: 1.0
+  amp: true
+  seed: 42
+  output_dir: outputs/scaled14L
+  save_best_by: val_pair_f1
+  early_stopping_patience: 12
+  min_delta: 0.0001
+  log_every: 20
+  train_decode_structures: true
+  val_decode_samples: 64
+  val_max_batches: 0
+
+decoding:
+  num_steps: 32
+  min_loop_length: 4
+  use_nussinov: true
+  allow_wobble: true
+  decode_source: pair
+  pair_threshold: 0.25
+  nussinov_gamma: 2.0
+  topk_pairs: 20
+
+ablation:
+  use_pair_head: true
+  use_pair_loss: true
+  use_nussinov: true
+  use_pair_aware_masking: true
+  use_motif_span_masking: false
+  use_motif_condition: false
+  use_family_condition: false
+
+relation_mask:
+  mode: multiscale
+  global_ratio: 0.4
+  stem_span_ratio: 0.35
+  hard_negative_ratio: 0.25
+  total_ratio: 0.3
+
+pair_calibration:
+  enabled: false
+  pair_logit_offset: 0.0
+
+baselines:
+  run_all_dot: true
+  run_random_pair: true
+  run_rnafold: false
+
+debug:
+  check_pair_batch: false

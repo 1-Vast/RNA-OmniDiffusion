@@ -106,6 +106,52 @@ class PairRefineBlock(nn.Module):
         return logits + self.net(logits.unsqueeze(1)).squeeze(1)
 
 
+class AxialPairRefineBlock(nn.Module):
+    """Axial attention pair refiner: row + column self-attention on pair logits.
+    Uses chunked attention to stay within GPU memory limits."""
+    def __init__(self, dim: int = 32, heads: int = 4, dropout: float = 0.0, chunk_size: int = 64) -> None:
+        super().__init__()
+        self.dim = dim
+        self.chunk_size = chunk_size
+        self.in_proj = nn.Conv2d(1, dim, 1)
+        self.row_norm = nn.LayerNorm(dim)
+        self.col_norm = nn.LayerNorm(dim)
+        self.out_proj = nn.Sequential(nn.Conv2d(dim, dim, 1), nn.GELU(), nn.Conv2d(dim, 1, 1))
+        self.gate = nn.Parameter(torch.zeros(1))
+
+    def _chunked_attn(self, qkv: torch.Tensor, norm: nn.LayerNorm) -> torch.Tensor:
+        """Chunked self-attention: qkv is (N, L, D), process in chunks of chunk_size rows."""
+        N, L, D = qkv.shape
+        cs = min(self.chunk_size, N)
+        out_chunks = []
+        for start in range(0, N, cs):
+            end = min(start + cs, N)
+            chunk = qkv[start:end]
+            chunk = norm(chunk)
+            chunk_out = F.scaled_dot_product_attention(chunk, chunk, chunk, scale=D ** -0.5)
+            out_chunks.append(chunk_out)
+        return torch.cat(out_chunks, dim=0)
+
+    def forward(self, logits: torch.Tensor) -> torch.Tensor:
+        B, L, _ = logits.shape
+        x = logits.unsqueeze(1)
+        x = self.in_proj(x)
+        D = self.dim
+
+        # Row attention: (B*L, L, D) in chunks
+        x_rows = x.permute(0, 2, 3, 1).reshape(B * L, L, D)
+        x_rows = self._chunked_attn(x_rows, self.row_norm)
+        x_rows = x_rows.reshape(B, L, L, D).permute(0, 3, 1, 2)
+
+        # Column attention: (B*L, L, D) in chunks
+        x_cols = x.permute(0, 3, 2, 1).reshape(B * L, L, D)
+        x_cols = self._chunked_attn(x_cols, self.col_norm)
+        x_cols = x_cols.reshape(B, L, L, D).permute(0, 3, 1, 2)
+
+        out = self.out_proj(x_rows + x_cols).squeeze(1)
+        return logits + self.gate * out
+
+
 class RNAOmniDiffusion(nn.Module):
     """RNA-OmniPrefold relation-aware masked denoising model for RNA folding."""
 
@@ -131,6 +177,7 @@ class RNAOmniDiffusion(nn.Module):
         pairrefinechannels: int = 16,
         pairrefineblocks: int = 1,
         pairrefinedrop: float = 0.0,
+        pairrefinetype: str = "conv2d",
         pair_arch: str | None = None,
         pair_logit_offset: float = 0.0,
         pair_specific_bias_enabled: bool = False,
@@ -205,10 +252,21 @@ class RNAOmniDiffusion(nn.Module):
             if self.distbias:
                 self.distance_bias = nn.Embedding(self.distbuckets, 1)
             if self.pairrefine:
-                self.pair_refiner = nn.ModuleList(
-                    PairRefineBlock(int(pairrefinechannels), float(pairrefinedrop))
-                    for _ in range(max(1, int(pairrefineblocks)))
-                )
+                refine_type = str(pairrefinetype).lower()
+                if refine_type == "axial":
+                    self.pair_refiner = nn.ModuleList(
+                        AxialPairRefineBlock(
+                            dim=int(pairrefinechannels),
+                            heads=max(1, int(pairrefinechannels) // 16),
+                            dropout=float(pairrefinedrop),
+                        )
+                        for _ in range(max(1, int(pairrefineblocks)))
+                    )
+                else:
+                    self.pair_refiner = nn.ModuleList(
+                        PairRefineBlock(int(pairrefinechannels), float(pairrefinedrop))
+                        for _ in range(max(1, int(pairrefineblocks)))
+                    )
             self.pair_specific_bias = None
             if pair_specific_bias_enabled:
                 self.pair_specific_bias = PairSpecificBias(

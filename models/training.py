@@ -88,6 +88,7 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     model.setdefault("pairrefine", False)
     model.setdefault("pairrefinechannels", 16)
     model.setdefault("pairrefineblocks", 1)
+    model.setdefault("pairrefinetype", "conv2d")
     model.setdefault("pairrefinedrop", 0.0)
     tasks = config.setdefault("tasks", {})
     if "seq_denoise" in tasks and "denoise" not in tasks:
@@ -291,6 +292,7 @@ def build_model(config: Dict[str, Any], tokenizer: RNAOmniTokenizer, device: tor
         pairrefinechannels=int(model_cfg.get("pairrefinechannels", 16)),
         pairrefineblocks=int(model_cfg.get("pairrefineblocks", 1)),
         pairrefinedrop=float(model_cfg.get("pairrefinedrop", 0.0)),
+        pairrefinetype=str(model_cfg.get("pairrefinetype", "conv2d")),
         pair_arch=str(config.get("pair_arch", {}).get("type", "base")) if (config.get("pair_arch", {}).get("enabled", False) or config.get("pair_residual", {}).get("enabled", False)) else None,
         pair_logit_offset=float(config.get("training", {}).get("pair_logit_offset", 0.0)),
         pair_specific_bias_enabled=bool(config.get("pair_specific_bias", {}).get("enabled", False)),
