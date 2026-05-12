@@ -20,21 +20,11 @@ from utils.metric import base_pair_f1, base_pair_precision, base_pair_recall
 from utils.struct import parse_dot_bracket, canonical_pair, validate_structure
 
 
-def nussinov_greedy(seq: str) -> str:
-    """Simple Nussinov-like greedy baseline: maximize canonical pairs."""
-    n = len(seq)
-    pairs = []
-    used = set()
-    for d in range(3, min(n, 100)):
-        for i in range(n - d):
-            j = i + d
-            if i in used or j in used: continue
-            if canonical_pair(seq[i], seq[j]):
-                pairs.append((i, j))
-                used.add(i)
-                used.add(j)
-    from utils.struct import pairs_to_dot_bracket
-    return pairs_to_dot_bracket(pairs, n)
+def nussinov_baseline(seq: str) -> str:
+    """ViennaRNA Nussinov: maximize number of canonical base pairs."""
+    fc = RNA.fold_compound(seq)
+    ss, _ = fc.mfe()
+    return ss
 
 
 def rnafold_predict(seq: str) -> str:
@@ -65,7 +55,7 @@ def run_benchmark(config_path, ckpt_path, split, device_name, decode, out_dir):
 
     methods = {
         "ViennaRNA": lambda seq: rnafold_predict(seq),
-        "NussinovGreedy": lambda seq: nussinov_greedy(seq),
+        "Nussinov": lambda seq: nussinov_baseline(seq),
         "OmniPrefold": lambda seq: omniprefold_predict(model, tokenizer, seq, config["decoding"], device),
     }
 

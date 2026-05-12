@@ -219,22 +219,22 @@ def run_overview(args: argparse.Namespace) -> None:
 
 
 def _run_train(args: argparse.Namespace) -> None:
-    from models.train import run_train
+    from models.training import run_train
     return run_train(args)
 
 
 def _run_eval(args: argparse.Namespace) -> None:
-    from models.train import run_eval
+    from models.training import run_eval
     return run_eval(args)
 
 
 def _run_smoke(args: argparse.Namespace) -> None:
-    from models.train import run_smoke
+    from models.training import run_smoke
     return run_smoke(args)
 
 
 def _run_infer(args: argparse.Namespace) -> None:
-    from models.infer import run_infer
+    from models.training import run_infer
     return run_infer(args)
 
 

@@ -97,6 +97,13 @@ class RNAOmniDataset:
         else:
             motifs = self._normalize_motifs(motifs, len(seq), line_no)
 
+        struct_tags = raw.get("struct_tags")
+        if isinstance(struct_tags, dict):
+            struct_tags = {
+                "numeric": struct_tags.get("numeric"),
+                "categorical": struct_tags.get("categorical"),
+            }
+
         sample = {
             "id": str(raw.get("id", f"{self.path.stem}_{line_no:06d}")),
             "seq": seq,
@@ -106,7 +113,10 @@ class RNAOmniDataset:
             "pairs": pairs,
             "length": len(seq),
             "is_labeled": bool(is_labeled),
+            "_struct_tags": struct_tags,
         }
+        if "_weight" in raw:
+            sample["_weight"] = float(raw["_weight"])
         return sample
 
     def _normalize_pairs(

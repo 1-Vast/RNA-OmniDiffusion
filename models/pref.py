@@ -36,11 +36,12 @@ def pref_ranking_loss(
     Returns
     -------
     loss : scalar tensor or None
-        -log(sigmoid(score_good - score_bad)).  None when the pair
-        difference set is empty (cannot form a valid contrast).
+        Per-pair BCE loss over difference-set pairs.
+        Preferred-only pairs get label=1, rejected-only pairs get label=0.
+        Returns None when the pair difference set is empty.
     """
-    pref_set = set(preferred_pairs)
-    rej_set = set(rejected_pairs)
+    pref_set = {tuple(p) for p in preferred_pairs}
+    rej_set = {tuple(p) for p in rejected_pairs}
 
     only_good = pref_set - rej_set
     only_bad = rej_set - pref_set
@@ -62,11 +63,16 @@ def pref_ranking_loss(
     if good_indices.numel() == 0 or bad_indices.numel() == 0:
         return None
 
-    score_good = pair_logits[good_indices[:, 0], good_indices[:, 1]].mean()
-    score_bad = pair_logits[bad_indices[:, 0], bad_indices[:, 1]].mean()
-
-    logit = score_good - score_bad
-    return -F.logsigmoid(logit)
+    # Per-pair BCE: each preferred-only pair should have high logit,
+    # each rejected-only pair should have low logit.
+    good_logits = pair_logits[good_indices[:, 0], good_indices[:, 1]]
+    bad_logits = pair_logits[bad_indices[:, 0], bad_indices[:, 1]]
+    all_logits = torch.cat([good_logits, bad_logits])
+    all_labels = torch.cat([
+        torch.ones_like(good_logits),
+        torch.zeros_like(bad_logits),
+    ])
+    return F.binary_cross_entropy_with_logits(all_logits, all_labels)
 
 
 def load_buffer(path: str | Path) -> List[dict]:
