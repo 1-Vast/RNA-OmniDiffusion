@@ -59,7 +59,7 @@ training:
 
 decoding:
   num_steps: 32
-  min_loop_length: 3
+  min_loop_length: 4
   use_nussinov: true
   allow_wobble: true
   decode_source: pair

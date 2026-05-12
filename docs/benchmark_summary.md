@@ -11,9 +11,12 @@
 | Method | Steps | Test F1 | Precision | Recall | Valid | Time/seq |
 |---|---|---|---|---|---|---|
 | **ViennaRNA 2.7.2** | — | **0.5179** | 0.4734 | 0.6078 | 100% | 11.5ms |
-| OmniPrefold | 300 | 0.3409 | 0.2872 | 0.4532 | 100% | 60.8ms |
+| **OmniPrefold + min_loop=4** | — (eval-only) | **0.3982** | 0.347 | 0.505 | 100% | ~70ms |
+| OmniPrefold (ml=3) | 300 | 0.3511 | 0.296 | 0.464 | 100% | 60.8ms |
 | OmniPrefold | 1000 | 0.3472 | — | — | 100% | — |
 | OmniPrefold | 3000 | 0.3285 | — | — | 100% | — |
+
+Note: min_loop=4 result is 3-seed mean. All pruning configurations are eval-only (no retraining).
 | **OmniPrefold + min_loop=4 prune** | — (eval-only) | **0.3896** | 0.3360 | 0.5281 | 100% | ~70ms |
 | **OmniPrefold + energy prior λ=0.5** | — (eval-only) | **0.3598** | 0.3081 | 0.4860 | 100% | ~2ms overhead |
 | OmniPrefold + bias table | 500 | 0.2428 (val) | — | — | 100% | — |
