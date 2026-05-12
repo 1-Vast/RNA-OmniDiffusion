@@ -8,12 +8,15 @@
 
 ### Overall (test split, 282 samples)
 
-| Method | Steps | Test F1 | Precision | Recall | Valid | Time/seq |
-|---|---|---|---|---|---|---|
-| **ViennaRNA 2.7.2** | — | **0.5179** | 0.4734 | 0.6078 | 100% | 11.5ms |
-| **OmniPrefold Ensemble (3 seeds)** | 300×3 | **0.4186** | 0.3627 | 0.5323 | 100% | ~210ms |
-| OmniPrefold (ml=4, seed42) | 300 | 0.4053 | 0.3517 | 0.5174 | 100% | 70ms |
-| OmniPrefold (ml=3, baseline) | 300 | 0.3511 | 0.296 | 0.464 | 100% | 60.8ms |
+| Method | Steps | Test F1 | Precision | Recall | Valid |
+|---|---|---|---|---|---|
+| **ViennaRNA 2.7.2** | — | **0.5179** | 0.4734 | 0.6078 | 100% |
+| **OmniPrefold Deeper (12L)** | 1000 | **0.4464** | 0.3947 | 0.5496 | 100% |
+| OmniPrefold Ensemble (base×3) | 300×3 | 0.4186 | 0.3627 | 0.5323 | 100% |
+| OmniPrefold Base (8L, ml=4) | 300 | 0.4053 | 0.3517 | 0.5174 | 100% |
+| OmniPrefold Baseline (ml=3) | 300 | 0.3511 | 0.296 | 0.464 | 100% |
+
+ViennaRNA gap reduced from 0.167 → **0.072**.
 
 Note: min_loop=4 result is 3-seed mean. All pruning configurations are eval-only (no retraining).
 | **OmniPrefold + min_loop=4 prune** | — (eval-only) | **0.3896** | 0.3360 | 0.5281 | 100% | ~70ms |

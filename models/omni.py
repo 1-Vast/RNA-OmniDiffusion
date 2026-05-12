@@ -587,9 +587,11 @@ def compute_omni_loss(
             pred_mass = (pred_probs * upper_mask.unsqueeze(0)).sum()
             soft_ratio = pred_mass / denom
             target_mass = denom * ratio_target
+            pm_max = float(pred_mass.detach().cpu()) * 3.0
+            tm_max = float(target_mass.detach().cpu()) * 3.0
             pair_ratio_loss = F.smooth_l1_loss(
-                torch.clamp(pred_mass, max=target_mass * 3.0),
-                torch.clamp(target_mass, min=0.0, max=pred_mass * 3.0),
+                torch.clamp(pred_mass, max=tm_max),
+                torch.clamp(target_mass, min=0.0, max=pm_max),
             )
             pair_ratio_loss = torch.clamp(pair_ratio_loss, max=max_aux)
             if not torch.isfinite(pair_ratio_loss):
