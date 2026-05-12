@@ -41,8 +41,22 @@ Per-positive-pair Python loop is prohibitively slow for training. Needs vectoriz
 
 ```yaml
 decoding:
-  min_loop_length: 4  # calibrated, +18.9% F1
+  min_loop_length: 4  # calibrated, +15% F1 over ml=3
   use_nussinov: true
   pair_threshold: 0.25
   nussinov_gamma: 2.0
+
+# For best results: ensemble 3 seeds' pair_logits before decode
+# Ensemble F1 = 0.4186 (vs baseline 0.3511, +19.2%)
 ```
+
+## Multi-seed Summary
+
+| Method | Seed42 | Seed123 | Seed2024 | **Mean/Ensemble** |
+|---|---|---|---|---|
+| Baseline (ml=3) | 0.3409 | 0.3286 | 0.3838 | 0.3511 |
+| ml=4 + prune | 0.4053 | 0.3673 | 0.4220 | 0.3983 |
+| **Ensemble (3 seeds)** | — | — | — | **0.4186** |
+| Oracle upper bound | — | — | — | 0.4805 |
+
+ViennaRNA gap: 0.5179 - 0.4186 = **0.099** (down from 0.167 baseline)
