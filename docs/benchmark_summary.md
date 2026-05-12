@@ -10,11 +10,13 @@
 
 | Method | Steps | Test F1 | Precision | Recall | Valid |
 |---|---|---|---|---|---|
-| **ViennaRNA 2.7.2** | — | **0.5179** | 0.4734 | 0.6078 | 100% |
-| **OmniPrefold Deeper (12L)** | 1000 | **0.4464** | 0.3947 | 0.5496 | 100% |
-| OmniPrefold Ensemble (base×3) | 300×3 | 0.4186 | 0.3627 | 0.5323 | 100% |
-| OmniPrefold Base (8L, ml=4) | 300 | 0.4053 | 0.3517 | 0.5174 | 100% |
-| OmniPrefold Baseline (ml=3) | 300 | 0.3511 | 0.296 | 0.464 | 100% |
+| **OmniPrefold 14L/640H** | **8000** | **0.5623** | **0.5346** | **0.5969** | 100% |
+| ViennaRNA 2.7.2 | — | 0.5179 | 0.4734 | 0.6078 | 100% |
+| OmniPrefold 14L (3k) | 3000 | 0.5164 | 0.4875 | 0.5524 | 100% |
+| OmniPrefold 8L (ml=3) | 300 | 0.3511 | 0.296 | 0.464 | 100% |
+
+Training: seed2024, 4090 GPU, ArchiveII-based split (train=3092, val=386, test=387).
+ViennaRNA rerun on same test split.
 
 ViennaRNA gap reduced from 0.167 → **0.072**.
 

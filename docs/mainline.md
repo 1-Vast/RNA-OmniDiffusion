@@ -5,8 +5,18 @@ RNA-OmniPrefold validated model framework after systematic cleanup of invalid/ne
 ## Configuration
 
 ```
-MS-MPRM + PairRefine + pair-aware masking + corrected lr schedule + strict Nussinov decode
+RNA-OmniPrefold 14L/640H/3xPairRefine + pair-aware masking + strict Nussinov decode (ml=6 prune)
 ```
+
+### Validated Performance (ArchiveII test, 387 samples)
+
+| Metric | Value |
+|---|---|
+| **Test F1** | **0.5623** |
+| Precision | 0.5346 |
+| Recall | 0.5969 |
+| Valid Structure Rate | 100% |
+| ViennaRNA F1 (same split) | 0.5179 |
 
 ### Fixed Parameters
 

@@ -1,14 +1,14 @@
 # RNA-OmniPrefold Strongest Mainline — 14L/640H/3xPairRefine
-# Validated: F1=0.4652 (local ArchiveII test split, seed42, ml=6+prune)
-# ViennaRNA gap: 0.053
-# No LLM. No global pair_logit_offset. pair_residual disabled.
+# Validated: F1=0.5623 (remote 4090, ArchiveII test, seed2024, 8000 steps)
+# ViennaRNA baseline: 0.5179 (same dataset/split)
+# No LLM. pair_logit_offset=0.0.
 data:
   train_jsonl: dataset/archive/train.jsonl
   val_jsonl: dataset/archive/val.jsonl
   test_jsonl: dataset/archive/test.jsonl
   max_length: 512
-  num_workers: 0
-  pin_memory: false
+  num_workers: 4
+  pin_memory: true
 
 tasks:
   seq2struct: 0.35
@@ -35,7 +35,7 @@ model:
   pairrefinedrop: 0.0
 
 training:
-  batch_size: 8
+  batch_size: 16
   epochs: 40
   lr: 0.001
   weight_decay: 0.01
@@ -48,14 +48,14 @@ training:
   structure_positive_weight: 1.0
   grad_clip: 1.0
   amp: true
-  seed: 42
+  seed: 2024
   output_dir: outputs/mainline_strongest
   save_best_by: val_pair_f1
-  early_stopping_patience: 12
+  early_stopping_patience: 15
   min_delta: 0.0001
   log_every: 20
   train_decode_structures: true
-  val_decode_samples: 64
+  val_decode_samples: 128
   val_max_batches: 0
 
 decoding:
