@@ -108,7 +108,7 @@ def build_history_pack() -> dict:
 
         "forbidden_interventions": [
             "LLM module", "semantic token", "preference", "reranker",
-            "sample weighting", "synthetic data", "new backbone", "RNA-FM",
+            "sample weighting", "synthetic data", "new backbone", "external encoder",
             "importance scoring", "query adapter", "tag auxiliary",
         ],
     }

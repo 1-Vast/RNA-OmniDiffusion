@@ -190,6 +190,21 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def amp_grad_scaler(device: torch.device, enabled: bool):
+    if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+        try:
+            return torch.amp.GradScaler(device.type, enabled=enabled)
+        except TypeError:
+            return torch.amp.GradScaler(enabled=enabled)
+    return torch.cuda.amp.GradScaler(enabled=enabled)
+
+
+def amp_autocast(device: torch.device, enabled: bool):
+    if hasattr(torch, "amp") and hasattr(torch.amp, "autocast"):
+        return torch.amp.autocast(device_type=device.type, enabled=enabled)
+    return torch.cuda.amp.autocast(enabled=enabled)
+
+
 def deep_update(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in updates.items():
         if isinstance(value, dict) and isinstance(base.get(key), dict):
@@ -906,7 +921,7 @@ def train_model(
         global_step = int(checkpoint.get("global_step", 0))
         print(f"Resumed training from {resume_path} at epoch {start_epoch}.")
     use_amp = bool(config["training"].get("amp", True)) and device.type == "cuda"
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    scaler = amp_grad_scaler(device, enabled=use_amp)
     output_dir = Path(config["training"]["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
     with (output_dir / "config_used.yaml").open("w", encoding="utf-8") as handle:
@@ -940,7 +955,7 @@ def train_model(
         for batch in train_loader:
             batch = move_batch_to_device(batch, device)
             optimizer.zero_grad(set_to_none=True)
-            with torch.cuda.amp.autocast(enabled=use_amp):
+            with amp_autocast(device, enabled=use_amp):
                 outputs = forward_model(model, batch)
                 loss_options["global_step"] = global_step
                 loss_dict = loss_from_batch(outputs, batch, loss_options)
@@ -1126,7 +1141,13 @@ def run_smoke(args: argparse.Namespace) -> None:
     config = deep_update(
         config,
         {
-            "data": {"max_length": 64, "num_workers": 0},
+            "data": {
+                "train_jsonl": "outputs/smoke/train.jsonl",
+                "val_jsonl": "outputs/smoke/val.jsonl",
+                "test_jsonl": "outputs/smoke/test.jsonl",
+                "max_length": 64,
+                "num_workers": 0,
+            },
             "model": {
                 "hidden_size": 64,
                 "num_layers": 2,
@@ -1147,7 +1168,7 @@ def run_smoke(args: argparse.Namespace) -> None:
             "decoding": {"num_steps": 4, "use_nussinov": True, "decode_source": "pair"},
         },
     )
-    create_tiny_jsonl_dataset(config, overwrite=False)
+    create_tiny_jsonl_dataset(config, overwrite=True)
     result = train_model(config, max_steps=2, device_name="auto")
     model = result["model"]
     tokenizer = result["tokenizer"]

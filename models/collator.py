@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Sequence
 
 import torch
 
@@ -172,11 +172,11 @@ class RNAOmniCollator:
             segment_ids.append(segment_id)
             return len(tokens) - 1
 
-        token_task_name = "denoise" if task_name == "seq_denoise" else task_name
-        add(self.tokenizer.task_token(token_task_name), 0)
-
         if task_name in {"seq2struct", "invfold", "motif_control"} and not sample.get("is_labeled", True):
             task_name = "seq_denoise"
+
+        token_task_name = "denoise" if task_name == "seq_denoise" else task_name
+        add(self.tokenizer.task_token(token_task_name), 0)
 
         if task_name == "motif_control" and (self.use_family_condition or self.use_motif_condition):
             family = sample.get("family") or ""
@@ -253,7 +253,12 @@ class RNAOmniCollator:
             return list(seq_positions) + list(struct_positions)
         if task_name == "seq_denoise":
             if mask_mode == "span":
-                return list(random_span_positions(len(sample["seq"]), mask_ratio, self.rng))
+                nucleotide_positions = random_span_positions(len(sample["seq"]), mask_ratio, self.rng)
+                return [
+                    seq_positions[nuc_idx]
+                    for nuc_idx in sorted(nucleotide_positions)
+                    if 0 <= nuc_idx < len(seq_positions)
+                ]
             return random_token_mask(seq_positions, mask_ratio, self.rng)
 
         length = sample["length"]

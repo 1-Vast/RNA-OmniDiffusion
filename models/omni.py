@@ -214,7 +214,14 @@ class RNAOmniDiffusion(nn.Module):
             batch_first=True,
             norm_first=True,
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        try:
+            self.encoder = nn.TransformerEncoder(
+                encoder_layer,
+                num_layers=num_layers,
+                enable_nested_tensor=False,
+            )
+        except TypeError:
+            self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.norm = nn.LayerNorm(hidden_size)
         self.sequence_head = nn.Linear(hidden_size, vocab_size)
         self.structure_head = nn.Linear(hidden_size, vocab_size)

@@ -57,7 +57,7 @@ All modules below were systematically tested and found to be invalid, negative, 
 
 | Module | Status | Reason |
 |---|---|---|
-| RNA-FM distillation | Removed | No contribution beyond D-only baseline |
+| External encoder distillation | Removed | No contribution beyond D-only baseline |
 | LLM semantic tokens | Removed | Dropped F1 from 0.572 → 0.385 |
 | LLM preference loss | Removed | No benefit over no-pref baseline |
 | LLM reranker | Removed | F1=0.1025 < Rule=0.1223 |

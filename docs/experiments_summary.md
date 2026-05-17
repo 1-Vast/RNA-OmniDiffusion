@@ -23,7 +23,7 @@ Final conclusions from systematic evaluation of model components and LLM integra
 
 | Route | Impact | Decision |
 |---|---|---|
-| RNA-FM distillation | No contribution beyond D-only | Removed |
+| External encoder distillation | No contribution beyond D-only | Removed |
 | LLM semantic tokens | F1 dropped 0.57→0.39 | Removed |
 | LLM preference / RAG preference | No benefit | Removed |
 | LLM reranker | Worse than rule reranker | Removed |

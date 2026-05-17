@@ -170,10 +170,10 @@ def nussinov_decode(
             pp = np.asarray(pair_prior, dtype=np.float32)
         score_matrix = score_matrix + float(pair_prior_alpha) * pp[:length, :length]
     elif pair_prior_alpha > 0 and pair_prior is None:
-        # Auto-build pair-prior from sequence
-        from models.pairprior import build_pair_prior_matrix
-        pp = build_pair_prior_matrix(seq, alpha=pair_prior_alpha)
-        score_matrix = score_matrix + pp[:length, :length]
+        # Auto-build pair-prior from sequence.
+        from utils.rna_priors import build_pair_prior_matrix
+        pp = build_pair_prior_matrix(seq)
+        score_matrix = score_matrix + float(pair_prior_alpha) * pp[:length, :length]
 
     valid_mask = np.zeros((length, length), dtype=bool)
     for i in range(length):

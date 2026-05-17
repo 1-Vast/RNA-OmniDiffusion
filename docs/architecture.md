@@ -56,7 +56,7 @@ Validation results (300-step, val split): the module improved F1 from 0.3223 to 
 | LLM reranker | F1=0.1025 < Rule=0.1223 |
 | LLM importance | Reduces F1 by ~0.005 |
 | PairLossPolicy | Weight changes do not affect F1 |
-| RNA-FM distillation | No contribution beyond D-only |
+| External encoder distillation | No contribution beyond D-only |
 
 ## Training Hyperparameters
 
