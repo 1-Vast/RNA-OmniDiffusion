@@ -12,6 +12,7 @@ MS-MPRM + PairRefine + pair-aware masking + corrected lr schedule + strict Nussi
 
 | Config | lr | Steps | F1 |
 |---|---|---|---|
+| Pair-rate + conflict regularized baseline | 0.0010 | 300 | 0.3651 |
 | **Corrected baseline** | **0.0010** | **300** | **0.3235** |
 | MS-MPRM + hard replay | 0.0001 | 300 | 0.2076 |
 | MS-MPRM | 0.0001 | 500 | 0.2527 |

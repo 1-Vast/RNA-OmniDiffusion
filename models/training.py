@@ -475,6 +475,7 @@ def estimate_loss_options(config: Dict[str, Any], dataset: RNAOmniDataset, token
             "pairFloat": bool(training.get("pairFloat", True)),
             "sampleNegOnGpu": bool(training.get("sampleNegOnGpu", True)),
             "lambdaConflict": float(training.get("lambdaConflict", 0.0)),
+            "lambdaPairCount": float(training.get("lambdaPairCount", 0.0)),
             "conflictMargin": float(training.get("conflictMargin", 1.0)),
             "conflictUseProb": bool(training.get("conflictUseProb", True)),
         },
@@ -500,7 +501,7 @@ def loss_from_batch(outputs: dict, batch: dict, loss_options: dict) -> dict:
 
 def update_running(total: dict, loss_dict: dict, batch_size: int) -> None:
     total["samples"] += batch_size
-    for key in ("loss", "token_loss", "pair_loss", "conflict_loss"):
+    for key in ("loss", "token_loss", "pair_loss", "conflict_loss", "pair_count_loss"):
         total[key] += float(loss_dict[key].detach().cpu()) * batch_size
     # preference metrics
     for key in ("pref_loss", "pref_covered"):
@@ -530,8 +531,12 @@ def update_running(total: dict, loss_dict: dict, batch_size: int) -> None:
         "negative_pair_prob_mean",
         "pair_ranking_accuracy_sampled",
         "lambdaConflict",
+        "lambdaPairCount",
         "mean_row_pair_prob_sum",
         "max_row_pair_prob_sum",
+        "pred_pair_density",
+        "true_pair_density",
+        "soft_pair_density_gap",
     ):
         value = loss_dict.get(key)
         if value is None:
@@ -551,6 +556,7 @@ def averages(total: dict, prefix: str) -> dict:
         f"{prefix}_token_loss": total["token_loss"] / denom,
         f"{prefix}_pair_loss": total["pair_loss"] / denom,
         f"{prefix}_conflict_loss": total["conflict_loss"] / denom,
+        f"{prefix}_pair_count_loss": total["pair_count_loss"] / denom,
     }
     if total.get("pref_covered", 0) > 0:
         result[f"{prefix}_pref_loss"] = total.get("pref_loss", 0.0) / total["pref_covered"]
@@ -578,8 +584,12 @@ def averages(total: dict, prefix: str) -> dict:
         "negative_pair_prob_mean",
         "pair_ranking_accuracy_sampled",
         "lambdaConflict",
+        "lambdaPairCount",
         "mean_row_pair_prob_sum",
         "max_row_pair_prob_sum",
+        "pred_pair_density",
+        "true_pair_density",
+        "soft_pair_density_gap",
     ):
         count = total.get(f"{key}_count", 0)
         if count:
@@ -648,7 +658,14 @@ def evaluate_model(
     decode_structures: bool = True,
 ) -> dict:
     model.eval()
-    totals = {"samples": 0, "loss": 0.0, "token_loss": 0.0, "pair_loss": 0.0, "conflict_loss": 0.0}
+    totals = {
+        "samples": 0,
+        "loss": 0.0,
+        "token_loss": 0.0,
+        "pair_loss": 0.0,
+        "conflict_loss": 0.0,
+        "pair_count_loss": 0.0,
+    }
     token_correct = 0
     token_count = 0
     pair_diag = {
@@ -720,6 +737,7 @@ def format_epoch_metrics(metrics: dict) -> str:
         "train_token_loss",
         "train_pair_loss",
         "train_conflict_loss",
+        "train_pair_count_loss",
         "val_loss",
         "val_token_acc",
         "val_pair_precision",
@@ -733,6 +751,9 @@ def format_epoch_metrics(metrics: dict) -> str:
         "rankAcc",
         "mean_row_pair_prob_sum",
         "max_row_pair_prob_sum",
+        "pred_pair_density",
+        "true_pair_density",
+        "soft_pair_density_gap",
         "epoch_time",
     ]
     parts = []
@@ -868,7 +889,16 @@ def train_model(
     for epoch in range(start_epoch, int(config["training"]["epochs"]) + 1):
         epoch_start = time.time()
         model.train()
-        train_totals = {"samples": 0, "loss": 0.0, "token_loss": 0.0, "pair_loss": 0.0, "conflict_loss": 0.0, "pref_loss": 0.0, "pref_covered": 0}
+        train_totals = {
+            "samples": 0,
+            "loss": 0.0,
+            "token_loss": 0.0,
+            "pair_loss": 0.0,
+            "conflict_loss": 0.0,
+            "pair_count_loss": 0.0,
+            "pref_loss": 0.0,
+            "pref_covered": 0,
+        }
         for batch in train_loader:
             batch = move_batch_to_device(batch, device)
             optimizer.zero_grad(set_to_none=True)
@@ -959,6 +989,7 @@ def train_model(
             "pairrefine": bool(config.get("model", {}).get("pairrefine", False)),
             "conflict_loss": averages(train_totals, "train").get("train_conflict_loss", 0.0),
             "lambdaConflict": float(config["training"].get("lambdaConflict", 0.0)),
+            "lambdaPairCount": float(config["training"].get("lambdaPairCount", 0.0)),
             "init_from_pretrain": str(init_from_pretrain or ""),
             "load_encoder_only": bool(config["training"].get("load_encoder_only", False)),
             "pretrain_loaded_keys": len(pretrain_load_report["loaded"]) if pretrain_load_report else 0,

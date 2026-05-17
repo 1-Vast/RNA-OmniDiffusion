@@ -36,6 +36,9 @@ training:
   lambda_seq: 1.0
   pair_negative_ratio: 5
   pair_positive_weight: 10.0
+  lambdaPairCount: 5.0
+  lambdaConflict: 0.01
+  conflictMargin: 1.0
   structure_positive_weight: 1.0
   grad_clip: 1.0
   amp: true

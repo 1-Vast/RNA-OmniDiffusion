@@ -274,6 +274,26 @@ def _conflict_loss(
     return loss, selected.mean(), selected.max()
 
 
+def _pair_count_loss(
+    pair_logits: torch.Tensor,
+    pair_labels: torch.Tensor,
+    lengths: torch.Tensor,
+    pair_options: dict,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    valid_upper = _pair_valid_mask(lengths, pair_logits.size(-1), pair_options, pair_logits.device)
+    if not valid_upper.any():
+        zero = pair_logits.new_zeros(())
+        return zero, zero, zero, zero
+    probs = pair_logits.float().sigmoid()
+    pred_counts = (probs * valid_upper.float()).sum(dim=(1, 2))
+    true_counts = (pair_labels.float() * valid_upper.float()).sum(dim=(1, 2))
+    valid_counts = valid_upper.float().sum(dim=(1, 2)).clamp_min(1.0)
+    pred_rate = pred_counts / valid_counts
+    true_rate = true_counts / valid_counts
+    loss = F.smooth_l1_loss(pred_rate, true_rate)
+    return loss, pred_rate.mean(), true_rate.mean(), (pred_rate - true_rate).mean()
+
+
 def compute_omni_loss(
     outputs: Dict[str, torch.Tensor | None],
     batch: dict,
@@ -308,8 +328,12 @@ def compute_omni_loss(
     pair_logits = outputs.get("pair_logits")
     pair_loss = token_loss.new_zeros(())
     conflict_loss = token_loss.new_zeros(())
+    pair_count_loss = token_loss.new_zeros(())
     mean_row_sum = token_loss.new_zeros(())
     max_row_sum = token_loss.new_zeros(())
+    pred_pair_density = token_loss.new_zeros(())
+    true_pair_density = token_loss.new_zeros(())
+    soft_pair_density_gap = token_loss.new_zeros(())
     pair_options = pair_options or {}
     pair_stats = {
         "pos": token_loss.new_zeros(()),
@@ -362,7 +386,20 @@ def compute_omni_loss(
     lambda_conflict = float(pair_options.get("lambdaConflict", 0.0))
     if use_pair_loss and pair_logits is not None and lambda_conflict > 0.0:
         conflict_loss, mean_row_sum, max_row_sum = _conflict_loss(pair_logits, lengths, pair_options)
-    total = token_loss + float(lambda_pair) * pair_loss + lambda_conflict * conflict_loss
+    lambda_pair_count = float(pair_options.get("lambdaPairCount", 0.0))
+    if use_pair_loss and pair_logits is not None and lambda_pair_count > 0.0:
+        pair_count_loss, pred_pair_density, true_pair_density, soft_pair_density_gap = _pair_count_loss(
+            pair_logits,
+            pair_labels,
+            lengths,
+            pair_options,
+        )
+    total = (
+        token_loss
+        + float(lambda_pair) * pair_loss
+        + lambda_conflict * conflict_loss
+        + lambda_pair_count * pair_count_loss
+    )
     pair_stats["pos_pair_count"] = pair_stats["pos"]
     pair_stats["neg_pair_count"] = pair_stats["neg"]
     pair_stats["pair_positive_weight_used"] = pair_stats["weight"]
@@ -377,9 +414,14 @@ def compute_omni_loss(
         "token_loss": token_loss.detach(),
         "pair_loss": pair_loss.detach(),
         "conflict_loss": conflict_loss.detach(),
+        "pair_count_loss": pair_count_loss.detach(),
         "lambdaConflict": token_loss.new_tensor(lambda_conflict),
+        "lambdaPairCount": token_loss.new_tensor(lambda_pair_count),
         "mean_row_pair_prob_sum": mean_row_sum.detach(),
         "max_row_pair_prob_sum": max_row_sum.detach(),
+        "pred_pair_density": pred_pair_density.detach(),
+        "true_pair_density": true_pair_density.detach(),
+        "soft_pair_density_gap": soft_pair_density_gap.detach(),
     }
     for key, value in pair_stats.items():
         if torch.is_tensor(value):
