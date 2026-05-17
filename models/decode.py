@@ -201,9 +201,9 @@ def nussinov_decode(
     for i, j in zip(valid_i.tolist(), valid_j.tolist()):
             valid_candidates.append((float(score_matrix[i, j]), i, j))
     valid_candidates.sort(reverse=True)
-    topk = max(1, min(len(valid_candidates), length // 2 if length > 1 else 1))
-    for rank, (_, i, j) in enumerate(valid_candidates[:topk]):
-        if score_matrix[i, j] <= 0:
+    if valid_candidates and valid_candidates[0][0] <= 0:
+        topk = max(1, min(len(valid_candidates), length // 2 if length > 1 else 1))
+        for rank, (_, i, j) in enumerate(valid_candidates[:topk]):
             score_matrix[i, j] = 0.05 * (topk - rank) / topk
 
     dp = np.zeros((length, length), dtype=np.float32)

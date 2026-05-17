@@ -899,9 +899,12 @@ def train_model(
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), float(config["training"].get("grad_clip", 1.0)))
+            scale_before_step = scaler.get_scale() if use_amp and scaler.is_enabled() else None
             scaler.step(optimizer)
             scaler.update()
-            scheduler.step()
+            scale_after_step = scaler.get_scale() if scale_before_step is not None else None
+            if scale_before_step is None or scale_after_step >= scale_before_step:
+                scheduler.step()
             global_step += 1
             update_running(train_totals, loss_dict, int(batch["input_ids"].size(0)))
             if global_step == 1 or global_step % log_every == 0:

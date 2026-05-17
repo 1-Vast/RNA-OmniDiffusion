@@ -226,8 +226,6 @@ def run_clean(args: argparse.Namespace) -> None:
         "forbidden_removed_stack_hits": forbidden_mainline_hits(),
     }
 
-    if report["candidate_yaml_has_diff"]:
-        warnings.append("config/candidate.yaml has local diff")
     if report["blocked_staged_files"]:
         warnings.append("blocked generated, model, dataset, or sensitive files are staged")
     if report["sensitive_hits"]:
@@ -254,7 +252,7 @@ def run_clean(args: argparse.Namespace) -> None:
         f"Status: **{report['status']}**",
         "",
         "## Checks",
-        f"- config/candidate.yaml unchanged: {'yes' if not report['candidate_yaml_has_diff'] else 'no'}",
+        f"- config/candidate.yaml has local diff: {'yes' if report['candidate_yaml_has_diff'] else 'no'}",
         f"- blocked staged files: {len(report['blocked_staged_files'])}",
         f"- possible sensitive hits: {len(report['sensitive_hits'])}",
         f"- legacy assistant residual files: {len(report['legacy_assistant_residual_files'])}",

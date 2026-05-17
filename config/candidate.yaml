@@ -28,9 +28,9 @@ model:
 training:
   batch_size: 24
   epochs: 20
-  lr: 0.0001
+  lr: 0.001
   weight_decay: 0.01
-  warmup_steps: 500
+  warmup_steps: 50
   lambda_pair: 5.0
   lambda_struct: 1.0
   lambda_seq: 1.0
