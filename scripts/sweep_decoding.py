@@ -243,6 +243,7 @@ def main() -> None:
                     allow_wobble=allow_wobble,
                     pair_threshold=threshold,
                     nussinov_gamma=gamma,
+                    max_pair_fraction=base_decoding.get("max_pair_fraction"),
                     input_is_logit=True,
                     pair_prior=None,
                     pair_prior_alpha=alpha,

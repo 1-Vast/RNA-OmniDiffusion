@@ -142,6 +142,8 @@ def nussinov_decode(
     allow_wobble: bool = True,
     pair_threshold: float = 0.5,
     nussinov_gamma: float = 1.0,
+    max_pairs: int | None = None,
+    max_pair_fraction: float | None = None,
     token_pair_compatibility: torch.Tensor | None = None,
     token_alpha: float = 0.25,
     input_is_logit: bool = False,
@@ -252,6 +254,20 @@ def nussinov_decode(
             backtrack(k + 1, j)
 
     backtrack(0, length - 1)
+    pair_limit = None
+    if max_pairs is not None:
+        pair_limit = int(max_pairs)
+    elif max_pair_fraction is not None and float(max_pair_fraction) > 0:
+        pair_limit = int(round(length * float(max_pair_fraction)))
+    if pair_limit is not None and len(pairs) > pair_limit:
+        pair_limit = max(0, pair_limit)
+        pairs = sorted(
+            sorted(
+                pairs,
+                key=lambda pair: float(score_matrix[pair[0], pair[1]]),
+                reverse=True,
+            )[:pair_limit],
+        )
     return pairs_to_dot_bracket(pairs, length)
 
 
@@ -407,6 +423,7 @@ def generate_structure_seq2struct(
                 allow_wobble=bool(decoding_config.get("allow_wobble", True)),
                 pair_threshold=float(decoding_config.get("pair_threshold", 0.5)),
                 nussinov_gamma=float(decoding_config.get("nussinov_gamma", 1.0)),
+                max_pair_fraction=decoding_config.get("max_pair_fraction"),
                 input_is_logit=True,
                 pair_prior=pair_prior,
                 pair_prior_alpha=pair_prior_alpha,
@@ -437,6 +454,7 @@ def generate_structure_seq2struct(
             allow_wobble=bool(decoding_config.get("allow_wobble", True)),
             pair_threshold=float(decoding_config.get("pair_threshold", 0.5)),
             nussinov_gamma=float(decoding_config.get("nussinov_gamma", 1.0)),
+            max_pair_fraction=decoding_config.get("max_pair_fraction"),
             token_pair_compatibility=compatibility,
             input_is_logit=True,
         )

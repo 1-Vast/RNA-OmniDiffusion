@@ -98,6 +98,11 @@ PARAM_REGISTRY: dict[str, list[tuple[str, str, str]]] = {
         ("use_nussinov", "Strict non-crossing DP decoding", "true for valid structures"),
         ("pair_threshold", "Pair probability threshold", "lower for recall, higher for precision"),
         ("nussinov_gamma", "Nussinov score scale", "higher makes pair scores sharper"),
+        (
+            "max_pair_fraction",
+            "Maximum decoded pairs as a fraction of sequence length",
+            "tune on validation",
+        ),
         ("method", "Decode method override", "leave unset for default"),
         ("min_loop_length", "Minimum pair index distance", "hairpin loop constraint"),
     ],

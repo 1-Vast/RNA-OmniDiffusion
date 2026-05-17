@@ -60,6 +60,7 @@ decoding:
   decode_source: pair
   pair_threshold: 0.25
   nussinov_gamma: 2.0
+  max_pair_fraction: 0.28
   topk_pairs: 20
 
 ablation:

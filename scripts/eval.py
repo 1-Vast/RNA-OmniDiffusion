@@ -471,6 +471,7 @@ def decode_one_nussinov_worker(payload: dict) -> dict:
             allow_wobble=bool(payload.get("allow_wobble", True)),
             pair_threshold=float(payload.get("threshold", 0.25)),
             nussinov_gamma=float(payload.get("gamma", 2.0)),
+            max_pair_fraction=payload.get("max_pair_fraction"),
             token_pair_compatibility=prior,
             token_alpha=float(payload.get("token_alpha", 0.0)),
             input_is_logit=True,
@@ -548,6 +549,7 @@ def decode_staged_nussinov(stage: dict, args: argparse.Namespace, config: dict, 
     count = len(lengths)
     threshold = float(args.threshold if args.threshold is not None else config["decoding"].get("pair_threshold", 0.25))
     gamma = float(args.gamma if args.gamma is not None else config["decoding"].get("nussinov_gamma", 2.0))
+    max_pair_fraction = config["decoding"].get("max_pair_fraction")
     source = str(args.source or "pair")
     if source == "hybrid" and "struct_token_scores" not in stage:
         raise SystemExit("Hybrid decode requires struct_token_logits in staged logits.")
@@ -572,6 +574,7 @@ def decode_staged_nussinov(stage: dict, args: argparse.Namespace, config: dict, 
                 "allow_wobble": bool(config["decoding"].get("allow_wobble", True)),
                 "threshold": threshold,
                 "gamma": gamma,
+                "max_pair_fraction": max_pair_fraction,
                 "source": source,
                 "token_alpha": float(args.token_alpha),
                 "pair_prior_alpha": float(args.pair_prior_alpha) if args.pair_prior == "auto" else 0.0,
@@ -772,6 +775,7 @@ def finalize_benchmark(
         "chunksize": int(args.chunksize),
         "threshold": args.threshold if args.threshold is not None else config["decoding"].get("pair_threshold", 0.25),
         "gamma": args.gamma if args.gamma is not None else config["decoding"].get("nussinov_gamma", 2.0),
+        "max_pair_fraction": config["decoding"].get("max_pair_fraction"),
         "source": args.source or "pair",
         "token_alpha": float(args.token_alpha),
         "pair_prior": args.pair_prior,
