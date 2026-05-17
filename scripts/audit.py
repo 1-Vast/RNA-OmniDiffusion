@@ -15,6 +15,7 @@ def parts(*items: str) -> str:
 
 TEXT_SUFFIXES = {".py", ".md", ".yaml", ".yml", ".json", ".toml", ".txt"}
 EXCLUDED_DIRS = {".git", "outputs", "dataset", "external", "checkpoints", "__pycache__"}
+EXCLUDED_PATH_PREFIXES = ("scripts/remote/",)
 BLOCKED_STAGE_PREFIXES = (
     "outputs/",
     "dataset/teacher_emb/",
@@ -120,7 +121,10 @@ def iter_project_text_files() -> list[Path]:
     for path in PROJECT_ROOT.rglob("*"):
         if not path.is_file():
             continue
+        relative = rel(path)
         if any(part in EXCLUDED_DIRS for part in path.relative_to(PROJECT_ROOT).parts):
+            continue
+        if any(relative.startswith(prefix) for prefix in EXCLUDED_PATH_PREFIXES):
             continue
         if path.suffix.lower() in TEXT_SUFFIXES or path.name in {"README.md", "INDEX.md"}:
             files.append(path)

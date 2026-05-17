@@ -124,11 +124,11 @@ class RNAOmniCollator:
             segment_ids.append(segment_id)
             return len(tokens) - 1
 
-        token_task_name = "denoise" if task_name == "seq_denoise" else task_name
-        add(self.tokenizer.task_token(token_task_name), 0)
-
         if task_name in {"seq2struct", "invfold", "motif_control"} and not sample.get("is_labeled", True):
             task_name = "seq_denoise"
+
+        token_task_name = "denoise" if task_name == "seq_denoise" else task_name
+        add(self.tokenizer.task_token(token_task_name), 0)
 
         if task_name == "motif_control" and (self.use_family_condition or self.use_motif_condition):
             family = sample.get("family") or ""
@@ -237,4 +237,3 @@ class RNAOmniCollator:
         # Keeping this collator positive-only avoids Python O(L^2) candidate
         # enumeration, which otherwise starves the GPU on real ArchiveII batches.
         return len(positive), 0
-

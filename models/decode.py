@@ -16,6 +16,23 @@ GREEDY_DECODE_WARNING = (
 )
 
 
+def _build_pair_prior_matrix(seq: str) -> np.ndarray:
+    scores = {
+        ("G", "C"): 1.0,
+        ("C", "G"): 1.0,
+        ("A", "U"): 0.6,
+        ("U", "A"): 0.6,
+        ("G", "U"): 0.3,
+        ("U", "G"): 0.3,
+    }
+    length = len(seq)
+    prior = np.zeros((length, length), dtype=np.float32)
+    for i in range(length):
+        for j in range(i + 1, length):
+            prior[i, j] = scores.get((seq[i], seq[j]), 0.0)
+    return prior
+
+
 def _forward_model(model: torch.nn.Module, batch: dict) -> dict:
     return model(
         input_ids=batch["input_ids"],
@@ -169,10 +186,8 @@ def nussinov_decode(
             pp = np.asarray(pair_prior, dtype=np.float32)
         score_matrix = score_matrix + float(pair_prior_alpha) * pp[:length, :length]
     elif pair_prior_alpha > 0 and pair_prior is None:
-        # Auto-build pair-prior from sequence
-        from models.pairprior import build_pair_prior_matrix
-        pp = build_pair_prior_matrix(seq, alpha=pair_prior_alpha)
-        score_matrix = score_matrix + pp[:length, :length]
+        pp = _build_pair_prior_matrix(seq)
+        score_matrix = score_matrix + float(pair_prior_alpha) * pp[:length, :length]
 
     valid_mask = np.zeros((length, length), dtype=bool)
     for i in range(length):
@@ -467,4 +482,3 @@ def generate_sequence_invfold(
     except ValueError:
         pass
     return "".join(seq_list)
-
