@@ -228,15 +228,10 @@ def _sample_pair_loss_mask(pair_labels: torch.Tensor, lengths: torch.Tensor, pai
     valid_mask = _pair_valid_mask(lengths, pair_labels.size(-1), pair_options, pair_labels.device)
     pos_mask = valid_mask & (pair_labels > 0.5)
     neg_mask = valid_mask & (pair_labels <= 0.5)
-    pos_count = int(pos_mask.sum().item())
-    if pos_count == 0:
-        return pos_mask
     ratio = int(pair_options.get("pairRatio", pair_options.get("pair_negative_ratio", 3)))
-    neg_total = int(neg_mask.sum().item())
-    if neg_total <= 0:
-        return pos_mask
-    target = min(neg_total, max(1, pos_count * ratio))
-    probability = float(target) / float(neg_total)
+    pos_count = pos_mask.sum().to(dtype=torch.float32)
+    neg_total = neg_mask.sum().to(dtype=torch.float32)
+    probability = (pos_count * float(ratio) / neg_total.clamp_min(1.0)).clamp(max=1.0)
     sampled_neg = neg_mask & (torch.rand(neg_mask.shape, device=pair_labels.device) < probability)
     return pos_mask | sampled_neg
 

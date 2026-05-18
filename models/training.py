@@ -502,13 +502,13 @@ def loss_from_batch(outputs: dict, batch: dict, loss_options: dict) -> dict:
 def update_running(total: dict, loss_dict: dict, batch_size: int) -> None:
     total["samples"] += batch_size
     for key in ("loss", "token_loss", "pair_loss", "conflict_loss", "pair_count_loss"):
-        total[key] += float(loss_dict[key].detach().cpu()) * batch_size
+        total[key] = total.get(key, loss_dict[key].new_zeros(())) + loss_dict[key].detach() * batch_size
     # preference metrics
     for key in ("pref_loss", "pref_covered"):
         val = loss_dict.get(key)
         if val is not None:
             if torch.is_tensor(val):
-                total[key] += float(val.detach().cpu())
+                total[key] = total.get(key, val.new_zeros(())) + val.detach()
             elif key == "pref_covered":
                 total[key] += int(val)
     for key in (
@@ -542,25 +542,32 @@ def update_running(total: dict, loss_dict: dict, batch_size: int) -> None:
         if value is None:
             continue
         if torch.is_tensor(value):
-            value = float(value.detach().cpu())
+            value = value.detach()
         total.setdefault(f"{key}_sum", 0.0)
         total.setdefault(f"{key}_count", 0)
-        total[f"{key}_sum"] += float(value)
+        total[f"{key}_sum"] = total[f"{key}_sum"] + value
         total[f"{key}_count"] += 1
+
+
+def scalar_value(value: object) -> float:
+    if torch.is_tensor(value):
+        return float(value.detach().cpu())
+    return float(value)
 
 
 def averages(total: dict, prefix: str) -> dict:
     denom = max(1, total["samples"])
+    pref_covered = scalar_value(total.get("pref_covered", 0.0))
     result = {
-        f"{prefix}_loss": total["loss"] / denom,
-        f"{prefix}_token_loss": total["token_loss"] / denom,
-        f"{prefix}_pair_loss": total["pair_loss"] / denom,
-        f"{prefix}_conflict_loss": total["conflict_loss"] / denom,
-        f"{prefix}_pair_count_loss": total["pair_count_loss"] / denom,
+        f"{prefix}_loss": scalar_value(total["loss"]) / denom,
+        f"{prefix}_token_loss": scalar_value(total["token_loss"]) / denom,
+        f"{prefix}_pair_loss": scalar_value(total["pair_loss"]) / denom,
+        f"{prefix}_conflict_loss": scalar_value(total["conflict_loss"]) / denom,
+        f"{prefix}_pair_count_loss": scalar_value(total["pair_count_loss"]) / denom,
     }
-    if total.get("pref_covered", 0) > 0:
-        result[f"{prefix}_pref_loss"] = total.get("pref_loss", 0.0) / total["pref_covered"]
-        result[f"{prefix}_pref_coverage"] = total["pref_covered"] / max(1, total["samples"])
+    if pref_covered > 0:
+        result[f"{prefix}_pref_loss"] = scalar_value(total.get("pref_loss", 0.0)) / pref_covered
+        result[f"{prefix}_pref_coverage"] = pref_covered / max(1, total["samples"])
     else:
         result[f"{prefix}_pref_loss"] = 0.0
         result[f"{prefix}_pref_coverage"] = 0.0
@@ -593,7 +600,7 @@ def averages(total: dict, prefix: str) -> dict:
     ):
         count = total.get(f"{key}_count", 0)
         if count:
-            result[key] = total[f"{key}_sum"] / count
+            result[key] = scalar_value(total[f"{key}_sum"]) / count
     return result
 
 
